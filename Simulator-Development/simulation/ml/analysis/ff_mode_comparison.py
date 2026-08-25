@@ -86,6 +86,10 @@ def main():
     ap.add_argument("--duration", type=float, default=60.0)
     ap.add_argument("--sim-dir", default=".", help="simulation/ directory (containing build/)")
     ap.add_argument("--out-dir", default="ml/results/ff_mode_comparison")
+    ap.add_argument("--reuse-existing", action="store_true",
+                    help="plot/measure existing telemetry CSVs without rerunning the simulator")
+    ap.add_argument("--keep-csv", action="store_true",
+                    help="retain telemetry CSVs for every seed, not only the representative seed")
     args = ap.parse_args()
 
     sim_dir = Path(args.sim_dir)
@@ -104,12 +108,17 @@ def main():
     for seed in seeds:
         for mode in MODES:
             csv_path = out_dir / f"telemetry_seed{seed}_{mode}.csv"
-            run_simulation(sim_bin, fc_lib, mode, seed, args.duration, csv_path)
+            if args.reuse_existing:
+                if not csv_path.exists():
+                    sys.exit(f"[ff_compare] --reuse-existing requested but missing {csv_path}")
+                print(f"[ff_compare] reusing mode={mode}: seed={seed} csv={csv_path}")
+            else:
+                run_simulation(sim_bin, fc_lib, mode, seed, args.duration, csv_path)
             df = pd.read_csv(csv_path, on_bad_lines="skip")
             all_metrics[mode].append(metrics_for(df))
             if seed == seeds[0]:
                 detail_dfs[mode] = df
-            else:
+            elif not args.keep_csv:
                 csv_path.unlink()  # only the first seed's raw telemetry is kept on disk
 
     _print_summary(all_metrics, seeds)
@@ -178,7 +187,7 @@ def _plot_summary(all_metrics, seeds, path):
         ax.tick_params(axis="x", rotation=15)
 
     fig.suptitle(f"Feedforward mode comparison, averaged over {len(seeds)} seeds {seeds}\n"
-                 "(error bars = std across seeds -- overlapping bars mean the difference isn't significant)",
+                 "(error bars = standard deviation across terrain seeds)",
                  fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.90])
     fig.savefig(path, dpi=150)

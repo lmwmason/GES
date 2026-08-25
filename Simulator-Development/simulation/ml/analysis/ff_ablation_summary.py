@@ -17,14 +17,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
-# (label, agl_err_rms mean, std, color, report citation)
+# Corrected quadratic-actuator 8-seed rerun (2026-08-25). The narrowed gate
+# is +/-5%; rejected predictions retain ge_ff_select()'s factor=1 fallback.
+# (mode, label, color)
 CONFIGS = [
-    ("No FF\n(feedback only)", 0.07004, 0.01050, "#c2410c", "Sec. 5.10"),
-    ("ML FF, naive\n(bias-corrected retrain)", 0.07069, 0.00984, "#f59e0b", "Sec. 5.10"),
-    ("ML FF, tightened\ntrust band (failed)", 0.07387, 0.01123, "#dc2626", "Sec. 5.12"),
-    ("Cheeseman-Bennett\nFF", 0.05950, 0.00570, "#8892a6", "Sec. 5.10"),
-    ("ML FF, hybrid\n(low-clearance cutover)", 0.06096, 0.00579, "#3b82f6", "Sec. 5.12"),
+    ("none", "No FF\n(feedback only)", "#c2410c"),
+    ("analytical", "Cheeseman-Bennett\nFF", "#8892a6"),
+    ("ml_pure", "Pure ML FF\n(20% trust band)", "#f59e0b"),
+    ("ml_narrow", "ML FF, narrowed\n5% trust band", "#dc2626"),
+    ("ml", "ML FF, hybrid\n(low-clearance cutover)", "#3b82f6"),
 ]
 
 
@@ -32,11 +35,18 @@ def main():
     out_dir = Path("ml/results/ff_mode_comparison")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    labels = [c[0] for c in CONFIGS]
-    means = [c[1] for c in CONFIGS]
-    stds = [c[2] for c in CONFIGS]
-    colors = [c[3] for c in CONFIGS]
-    cites = [c[4] for c in CONFIGS]
+    telemetry_dir = Path("ml/results/ff_mode_comparison_sqrt")
+    labels = [c[1] for c in CONFIGS]
+    colors = [c[2] for c in CONFIGS]
+    means, stds = [], []
+    for mode, _, _ in CONFIGS:
+        values = []
+        for seed in range(1, 9):
+            df = pd.read_csv(telemetry_dir / f"telemetry_seed{seed}_{mode}.csv")
+            values.append(float(np.sqrt(np.mean((df["rangefinder_alt"] - 0.22) ** 2))))
+        means.append(float(np.mean(values)))
+        stds.append(float(np.std(values, ddof=1)))
+        print(f"[ablation] {mode:<10s} AGL RMS={means[-1]:.6f}+/-{stds[-1]:.6f}")
 
     fig, ax = plt.subplots(figsize=(10, 6))
     y_pos = np.arange(len(CONFIGS))
@@ -46,11 +56,11 @@ def main():
     ax.set_xlabel("AGL tracking error RMS [m] (8-seed mean +/- std, lower = better)")
     ax.spines[["top", "right"]].set_visible(False)
 
-    for i, (m, s, cite) in enumerate(zip(means, stds, cites)):
-        ax.text(m + s + 0.001, i, f"{m:.4f} ({cite})", va="center", fontsize=9)
+    for i, (m, s) in enumerate(zip(means, stds)):
+        ax.text(m + s + 0.001, i, f"{m:.4f}", va="center", fontsize=9)
 
-    ax.set_title("The full search for a working ML feedforward\n"
-                  "(each attempt tried to fix the one before it -- see docs/research_report.md Sec. 5.7-5.12)",
+    ax.set_title("Closed-loop feedforward comparison\n"
+                 "(corrected quadratic actuator mapping; 8 terrain seeds)",
                   fontsize=12)
     fig.tight_layout()
     path = out_dir / "ff_ablation_summary.png"

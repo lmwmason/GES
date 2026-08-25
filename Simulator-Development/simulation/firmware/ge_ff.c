@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <strings.h>
 
+/* Flat-ground Cheeseman-Bennett thrust multiplier. The controller converts
+ * this thrust-domain factor to an actuator-domain correction with 1/sqrt(f)
+ * because motor thrust is quadratic in the throttle-proportional rpm. */
 double ge_ff_analytical_factor(double rangefinder_alt_m) {
     if (isnan(rangefinder_alt_m) || rangefinder_alt_m <= 0.0) return 1.0;
     double z = rangefinder_alt_m;
@@ -16,27 +19,22 @@ double ge_ff_analytical_factor(double rangefinder_alt_m) {
     return clampd(factor, 0.85, 1.6);
 }
 
-/* Default is ANALYTICAL, not ML. docs/research_report.md Sections 5.9-5.11
- * found (and confirmed the mechanism for) a real offline-vs-closed-loop
- * failure mode: the trained MLP is far more accurate offline (Section
- * 5.2b), but under closed-loop control its error spikes right at the
- * lowest-clearance instants and that spike compounds into an even worse
- * clearance the next tick. GE_FF_MODE_ML's fc_step() branch now hard-cuts
- * over to the analytical estimate below GE_FF_LOW_CLEARANCE_M specifically
- * to break that feedback loop (Section 5.12), which brought it back down
- * to statistically match analytical's closed-loop performance -- but that
- * only confirms "no longer worse," not "meaningfully better" once the
- * dangerous zone is patched over with analytical anyway, so analytical
- * alone remains the default: it's simpler, has zero training cost, and
- * the ML hybrid's advantage in the non-danger-zone majority of flight
- * hasn't been shown to be statistically significant yet. Pass
- * GE_FF_MODE=ml explicitly to use the hybrid. */
+/* Default is ANALYTICAL, not ML. With the quadratic actuator mapping
+ * compensated in fc_step(), the corrected 8-seed closed-loop rerun still
+ * gives analytical lower AGL RMS than the ML hybrid. Prediction error also
+ * remains coupled to next-tick clearance, but the physically consistent
+ * direction is overprediction -> too little commanded throttle -> clearance
+ * loss (underprediction produces excess thrust, not a thrust deficit). The
+ * ML branch retains its low-clearance analytical cutover as a safety guard;
+ * pass GE_FF_MODE=ml explicitly to use the hybrid. */
 ge_ff_mode_t ge_ff_mode_from_env(void) {
     const char *v = getenv("GE_FF_MODE");
     if (!v) return GE_FF_MODE_ANALYTICAL;
     if (!strcasecmp(v, "none") || !strcasecmp(v, "off") || !strcasecmp(v, "disabled")) return GE_FF_MODE_NONE;
     if (!strcasecmp(v, "analytical") || !strcasecmp(v, "cheeseman")) return GE_FF_MODE_ANALYTICAL;
     if (!strcasecmp(v, "ml") || !strcasecmp(v, "ai")) return GE_FF_MODE_ML;
+    if (!strcasecmp(v, "ml_pure") || !strcasecmp(v, "pure_ml")) return GE_FF_MODE_ML_PURE;
+    if (!strcasecmp(v, "ml_narrow") || !strcasecmp(v, "narrowed")) return GE_FF_MODE_ML_NARROW;
     return GE_FF_MODE_ANALYTICAL;
 }
 

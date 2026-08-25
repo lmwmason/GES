@@ -23,22 +23,17 @@ typedef enum {
 typedef enum {
     GE_FF_MODE_NONE = 0,       /* no feedforward: PID reacts to ground effect purely via feedback */
     GE_FF_MODE_ANALYTICAL = 1, /* always use the flat-ground Cheeseman-Bennett estimate */
-    GE_FF_MODE_ML = 2          /* use the trained model, gated by ge_ff_select()'s trust band */
+    GE_FF_MODE_ML = 2,         /* hybrid: ML with low-clearance analytical cutover */
+    GE_FF_MODE_ML_PURE = 3,    /* ML with the standard gate and no cutover */
+    GE_FF_MODE_ML_NARROW = 4   /* ML with a narrow gate and no cutover */
 } ge_ff_mode_t;
 
 #define GE_FF_TRUST_BAND 0.20 /* +/-20% */
+#define GE_FF_NARROW_TRUST_BAND 0.05 /* +/-5%, corrected-mapping ablation */
 
-/* docs/research_report.md Section 5.11: the ML model's error is normally
- * small on average but spikes right at the lowest-clearance instants --
- * exactly where a wrong correction does the most damage -- and that spike
- * feeds back into an even lower clearance the next tick (confirmed: mean
- * signed error right before a clearance dip is ~10x the trajectory
- * average, and correlates with how much further the dip goes). Below this
- * clearance, fc_step() skips the ML path entirely and uses the analytical
- * estimate instead -- tightening ge_ff_select()'s trust band here instead
- * was tried first and made things *worse*, because its reject path sets
- * factor=1.0 (no compensation), which is worse than a crude-but-safe
- * analytical estimate right where compensation matters most. */
+/* Below this clearance the hybrid skips ML and uses the analytical estimate.
+ * In the corrected-mapping ablation this outperformed both pure ML and a
+ * narrowed trust band, whose reject path sets factor=1.0 (no compensation). */
 #define GE_FF_LOW_CLEARANCE_M       0.15
 
 /* Reads GE_FF_MODE ("none" | "analytical" | "ml", case-insensitive) from

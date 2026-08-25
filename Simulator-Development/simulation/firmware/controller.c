@@ -89,6 +89,8 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
         g.dbg.ge_ff_ai = NAN;
         break;
     case GE_FF_MODE_ML:
+    case GE_FF_MODE_ML_PURE:
+    case GE_FF_MODE_ML_NARROW:
     default: {
         /* Feature order must match ge_ff_ml_weights.h exactly. thrust_cmd_norm
          * is the *previous* tick's g.dbg value (this tick's throttle_cmd is
@@ -102,7 +104,8 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
             g.dbg.thrust_cmd_norm,
         };
         double ai_pred = ge_ff_ml_predict(features);
-        if (in->rangefinder_alt < GE_FF_LOW_CLEARANCE_M) {
+        if (g.ge_ff_mode == GE_FF_MODE_ML &&
+            in->rangefinder_alt < GE_FF_LOW_CLEARANCE_M) {
             /* Don't just tighten the trust band here: ge_ff_select()'s
              * reject path sets factor=1.0 (no compensation at all), which
              * is worse than a crude-but-safe analytical estimate right
@@ -112,7 +115,9 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
             ge_factor = analytical;
             src = GE_FF_SRC_ANALYTICAL;
         } else {
-            src = ge_ff_select(analytical, ai_pred, GE_FF_TRUST_BAND, &ge_factor);
+            double band = g.ge_ff_mode == GE_FF_MODE_ML_NARROW
+                        ? GE_FF_NARROW_TRUST_BAND : GE_FF_TRUST_BAND;
+            src = ge_ff_select(analytical, ai_pred, band, &ge_factor);
         }
         g.dbg.ge_ff_ai = ai_pred;
         break;
@@ -121,9 +126,10 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
 
     double throttle_cmd = throttle_raw;
     if (src != GE_FF_SRC_DISABLED) {
-        /* Pre-divide by the expected thrust augmentation so the altitude
-         * loop doesn't have to react after the fact. */
-        throttle_cmd = throttle_raw / ge_factor;
+        /* Motor thrust is proportional to rpm^2 while rpm is proportional
+         * to throttle command. Cancel the expected thrust augmentation by
+         * scaling rpm (and therefore throttle) by 1/sqrt(ge_factor). */
+        throttle_cmd = throttle_raw / sqrt(ge_factor);
     }
     throttle_cmd = clampd(throttle_cmd, 0.0, 1.0);
 

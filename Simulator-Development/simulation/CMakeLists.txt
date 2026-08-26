@@ -10,7 +10,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-add_compile_options(-Wall -Wextra -O2 -ffast-math)
+# Do not enable -ffast-math: firmware sensor/factor guards deliberately use
+# isnan/isfinite, whose semantics that option permits the compiler to discard.
+add_compile_options(-Wall -Wextra -O2)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/common
@@ -55,3 +57,11 @@ add_executable(simulator
     sim/telemetry.c
 )
 target_link_libraries(simulator physics common m dl)
+
+enable_testing()
+add_executable(test_ge_ff
+    tests/test_ge_ff.c
+    firmware/ge_ff.c
+)
+target_link_libraries(test_ge_ff common m)
+add_test(NAME ge_ff_actuator_mapping COMMAND test_ge_ff)

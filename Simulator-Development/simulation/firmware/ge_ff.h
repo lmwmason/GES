@@ -12,7 +12,8 @@
 typedef enum {
     GE_FF_SRC_ANALYTICAL = 0,
     GE_FF_SRC_AI = 1,
-    GE_FF_SRC_DISABLED = 2
+    GE_FF_SRC_DISABLED = 2,
+    GE_FF_SRC_ORACLE = 3
 } ge_ff_source_t;
 
 /* Which feedforward compensation fc_step() applies. Selectable at runtime
@@ -25,7 +26,10 @@ typedef enum {
     GE_FF_MODE_ANALYTICAL = 1, /* always use the flat-ground Cheeseman-Bennett estimate */
     GE_FF_MODE_ML = 2,         /* hybrid: ML with low-clearance analytical cutover */
     GE_FF_MODE_ML_PURE = 3,    /* ML with the standard gate and no cutover */
-    GE_FF_MODE_ML_NARROW = 4   /* ML with a narrow gate and no cutover */
+    GE_FF_MODE_ML_NARROW = 4,  /* ML with a narrow gate and no cutover */
+    GE_FF_MODE_ORACLE = 5,     /* diagnostic only: simulator ground truth */
+    GE_FF_MODE_ML_DIRECT = 6,  /* direct/ungated MLP prediction */
+    GE_FF_MODE_ML_ASYM_CLAMP = 7 /* hybrid plus upper cap vs analytical */
 } ge_ff_mode_t;
 
 #define GE_FF_TRUST_BAND 0.20 /* +/-20% */
@@ -60,5 +64,9 @@ double ge_ff_ml_predict(const double features[13]);
  * to disabling feedforward entirely for this tick (never blend/clamp --
  * an FF term the controller can't trust is worse than none). */
 ge_ff_source_t ge_ff_select(double analytical, double ai_pred, double band_frac, double *out_factor);
+
+/* Correct actuator-domain mapping for a thrust-domain GE multiplier. */
+double ge_ff_compensate_throttle(double throttle_raw, double factor);
+double ge_ff_asym_clamp_delta_from_env(void);
 
 #endif

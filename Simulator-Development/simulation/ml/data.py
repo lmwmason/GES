@@ -4,6 +4,7 @@ training scripts (train_models.py: classical sklearn models;
 train_all_models.py: classical + PyTorch models).
 """
 from pathlib import Path
+import random
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,7 @@ FEATURE_COLS = [
 ]
 TARGET_COL = "ge_factor_truth_mean"
 BASELINE_COL = "ge_ff_analytical"
+DEFAULT_GROUP_SPLIT_SEED = 20260825
 
 
 def load_dataset(csv_path: Path) -> pd.DataFrame:
@@ -74,6 +76,46 @@ def block_split(df: pd.DataFrame, test_frac: float, block_s: float = 10.0, seed:
     print(f"[data] split: {len(train_df)} train rows / {len(test_df)} test rows "
           f"({n_test_blocks}/{len(unique_blocks)} {block_s:.0f}s blocks held out)")
     return train_df, test_df
+
+
+def seed_group_split(df: pd.DataFrame, train_count=240, val_count=30,
+                     test_count=30, random_seed=DEFAULT_GROUP_SPLIT_SEED):
+    """Deterministically split whole terrain seeds with zero cross-split leakage."""
+    seeds = sorted(int(s) for s in df["seed"].unique())
+    expected = train_count + val_count + test_count
+    if len(seeds) != expected:
+        raise ValueError(f"group split requires exactly {expected} unique seeds, found {len(seeds)}")
+    shuffled = seeds.copy()
+    random.Random(random_seed).shuffle(shuffled)
+    split_seeds = {
+        "train": sorted(shuffled[:train_count]),
+        "validation": sorted(shuffled[train_count:train_count + val_count]),
+        "test": sorted(shuffled[train_count + val_count:]),
+    }
+    assert_seed_splits_disjoint(split_seeds)
+    frames = {
+        name: df[df["seed"].isin(values)].copy()
+        for name, values in split_seeds.items()
+    }
+    for name, frame in frames.items():
+        actual = set(int(s) for s in frame["seed"].unique())
+        if actual != set(split_seeds[name]):
+            raise AssertionError(f"{name} row membership does not match recorded seed list")
+    return frames["train"], frames["validation"], frames["test"], split_seeds
+
+
+def assert_seed_splits_disjoint(split_seeds):
+    required = {"train", "validation", "test"}
+    if set(split_seeds) != required:
+        raise ValueError(f"split keys must be {sorted(required)}")
+    sets = {name: set(map(int, values)) for name, values in split_seeds.items()}
+    for a, b in (("train", "validation"), ("train", "test"), ("validation", "test")):
+        overlap = sets[a] & sets[b]
+        if overlap:
+            raise ValueError(f"seed leakage between {a} and {b}: {sorted(overlap)}")
+    if any(not values for values in sets.values()):
+        raise ValueError("all seed splits must be non-empty")
+    return True
 
 
 def infer_dt(df: pd.DataFrame) -> float:

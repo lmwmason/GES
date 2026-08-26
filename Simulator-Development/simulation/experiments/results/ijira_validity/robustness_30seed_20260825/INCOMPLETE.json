@@ -1,0 +1,6 @@
+{
+  "complete": false,
+  "reason": "Sequential run was interrupted after 233 completed simulations to replace it with a complete, unchanged 4-worker run.",
+  "replacement_run": "../robustness_30seed_20260825_complete",
+  "completed_records_preserved": 233
+}

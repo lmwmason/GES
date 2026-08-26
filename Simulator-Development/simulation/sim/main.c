@@ -24,6 +24,7 @@
 typedef void (*fc_init_fn)(void);
 typedef void (*fc_step_fn)(const sensor_packet_t *, actuator_packet_t *);
 typedef void (*fc_get_debug_fn)(fc_debug_t *);
+typedef void (*fc_set_diagnostic_ge_truth_fn)(double, double);
 
 typedef struct {
     const double *rpm; /* [4], held fixed across one physics step's RK4 stages */
@@ -146,11 +147,18 @@ static void print_usage(const char *prog) {
     fprintf(stderr,
         "Usage: %s [--fc PATH] [--host HOST] [--port PORT] [--duration SEC]\n"
         "          [--seed N] [--fast] [--no-telemetry] [--csv PATH]\n"
+        "          [--oracle-bias X] [--oracle-pulse-start SEC] [--oracle-pulse-duration SEC]\n"
+        "          [--ge-slope-exponent X] [--ge-curvature-gain X]\n"
         "  --fc PATH        path to the firmware shared object (default: auto-detected next to this binary)\n"
         "  --seed N         terrain seed (default 1); different seeds -> different irregular terrain\n"
         "  --fast           skip real-time pacing, run as fast as the CPU allows (for dataset generation)\n"
         "  --no-telemetry   don't open/send the UDP telemetry socket\n"
-        "  --csv PATH       append one row per telemetry tick to a CSV dataset file\n",
+        "  --csv PATH       write one row per telemetry tick to a CSV dataset file\n"
+        "  --oracle-bias X  diagnostic signed bias added to oracle GE factor\n"
+        "  --oracle-pulse-start SEC  apply oracle bias only after this time\n"
+        "  --oracle-pulse-duration SEC  pulse width; requires pulse start\n"
+        "  --ge-slope-exponent X  heuristic slope exponent (default 1.0)\n"
+        "  --ge-curvature-gain X  heuristic curvature gain (default 0.6)\n",
         prog);
 }
 
@@ -163,6 +171,11 @@ int main(int argc, char **argv) {
     int fast_mode = 0;
     int telemetry_enabled = 1;
     const char *csv_path = NULL;
+    double oracle_bias = 0.0;
+    double oracle_pulse_start = -1.0;
+    double oracle_pulse_duration = 0.0;
+    double ge_slope_exponent = 1.0;
+    double ge_curvature_gain = 0.6;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--fc") && i + 1 < argc) fc_path = argv[++i];
@@ -173,8 +186,18 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--fast")) fast_mode = 1;
         else if (!strcmp(argv[i], "--no-telemetry")) telemetry_enabled = 0;
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc) csv_path = argv[++i];
+        else if (!strcmp(argv[i], "--oracle-bias") && i + 1 < argc) oracle_bias = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--oracle-pulse-start") && i + 1 < argc) oracle_pulse_start = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--oracle-pulse-duration") && i + 1 < argc) oracle_pulse_duration = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--ge-slope-exponent") && i + 1 < argc) ge_slope_exponent = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--ge-curvature-gain") && i + 1 < argc) ge_curvature_gain = atof(argv[++i]);
         else if (!strcmp(argv[i], "--help")) { print_usage(argv[0]); return 0; }
         else { fprintf(stderr, "[sim] unknown argument: %s\n", argv[i]); print_usage(argv[0]); return 1; }
+    }
+    if ((oracle_pulse_start >= 0.0 && oracle_pulse_duration <= 0.0) ||
+        (oracle_pulse_start < 0.0 && oracle_pulse_duration > 0.0)) {
+        fprintf(stderr, "[sim] oracle pulse start and positive duration must be supplied together\n");
+        return 1;
     }
     if (!fc_path) fc_path = default_fc_path();
 
@@ -187,13 +210,16 @@ int main(int argc, char **argv) {
     fc_init_fn fc_init_p = (fc_init_fn)dlsym(handle, "fc_init");
     fc_step_fn fc_step_p = (fc_step_fn)dlsym(handle, "fc_step");
     fc_get_debug_fn fc_get_debug_p = (fc_get_debug_fn)dlsym(handle, "fc_get_debug");
-    if (!fc_init_p || !fc_step_p || !fc_get_debug_p) {
+    fc_set_diagnostic_ge_truth_fn fc_set_oracle_p =
+        (fc_set_diagnostic_ge_truth_fn)dlsym(handle, "fc_set_diagnostic_ge_truth");
+    if (!fc_init_p || !fc_step_p || !fc_get_debug_p || !fc_set_oracle_p) {
         fprintf(stderr, "[sim] dlsym failed: %s\n", dlerror());
         return 1;
     }
     fc_init_p();
 
     terrain_init(seed);
+    ge_configure(ge_slope_exponent, ge_curvature_gain);
     printf("[sim] terrain seed: %u\n", seed);
 
     telemetry_t tm;
@@ -220,7 +246,8 @@ int main(int argc, char **argv) {
             "motor_current_0,motor_current_1,motor_current_2,motor_current_3,"
             "thrust_cmd_norm,ge_ff_analytical,"
             "ge_factor_truth_0,ge_factor_truth_1,ge_factor_truth_2,ge_factor_truth_3,"
-            "ge_factor_truth_mean,ge_ff_ai,ge_ff_source\n");
+            "ge_factor_truth_mean,ge_ff_ai,ge_ff_source,ge_ff_applied,"
+            "ge_oracle_truth,ge_oracle_bias,ge_ff_clamped,true_agl,min_rotor_clearance\n");
         printf("[sim] writing dataset csv: %s\n", csv_path);
     }
 
@@ -245,6 +272,19 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 4; i++) rpm_now[i] = motors[i].rpm;
 
         sensor_packet_t sp = build_sensors(&rb, rpm_now, t, dt);
+        double oracle_truth[4];
+        for (int i = 0; i < 4; i++) {
+            vec3_t off = {DP_MOTOR_LAYOUT[i].x, DP_MOTOR_LAYOUT[i].y, 0.0};
+            vec3_t rotor_pos = v3_add(rb.pos, q_rotate(rb.quat, off));
+            ge_result_t ge = ge_compute(rotor_pos, DP_ROTOR_RADIUS_M);
+            oracle_truth[i] = ge.factor;
+        }
+        double oracle_mean = 0.25 * (oracle_truth[0] + oracle_truth[1] + oracle_truth[2] + oracle_truth[3]);
+        double active_oracle_bias = oracle_bias;
+        if (oracle_pulse_start >= 0.0 &&
+            !(t >= oracle_pulse_start && t < oracle_pulse_start + oracle_pulse_duration))
+            active_oracle_bias = 0.0;
+        fc_set_oracle_p(oracle_mean, active_oracle_bias);
         actuator_packet_t ap;
         fc_step_p(&sp, &ap);
 
@@ -266,6 +306,14 @@ int main(int argc, char **argv) {
         if (t >= next_telemetry_t) {
             double ge_truth[4];
             compute_body_forces(&rb, rpm_step, &(vec3_t){0}, &(vec3_t){0}, &(vec3_t){0}, ge_truth);
+            double min_rotor_clearance = INFINITY;
+            for (int i = 0; i < 4; i++) {
+                vec3_t off = {DP_MOTOR_LAYOUT[i].x, DP_MOTOR_LAYOUT[i].y, 0.0};
+                vec3_t rotor_pos = v3_add(rb.pos, q_rotate(rb.quat, off));
+                double clearance = ge_compute(rotor_pos, DP_ROTOR_RADIUS_M).clearance;
+                if (clearance < min_rotor_clearance) min_rotor_clearance = clearance;
+            }
+            double true_agl = rb.pos.z - terrain_height(rb.pos.x, rb.pos.y);
 
             fc_debug_t dbg;
             fc_get_debug_p(&dbg);
@@ -300,7 +348,8 @@ int main(int argc, char **argv) {
                     "%.2f,%.2f,%.2f,%.2f,"
                     "%.4f,%.4f,%.4f,%.4f,"
                     "%.4f,%.4f,"
-                    "%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d\n",
+                    "%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,"
+                    "%.5f,%.5f,%.5f,%d,%.5f,%.5f\n",
                     seed, t, rb.pos.x, rb.pos.y, rb.pos.z,
                     sp.gyro[0], sp.gyro[1], sp.gyro[2],
                     sp.rangefinder_alt, sp.baro_alt,
@@ -308,7 +357,9 @@ int main(int argc, char **argv) {
                     sp.motor_current[0], sp.motor_current[1], sp.motor_current[2], sp.motor_current[3],
                     dbg.thrust_cmd_norm, dbg.ge_ff_analytical,
                     ge_truth[0], ge_truth[1], ge_truth[2], ge_truth[3], ge_mean,
-                    dbg.ge_ff_ai, dbg.ge_ff_source);
+                    dbg.ge_ff_ai, dbg.ge_ff_source,
+                    dbg.ge_ff_applied, dbg.ge_oracle_truth, dbg.ge_oracle_bias,
+                    dbg.ge_ff_clamped, true_agl, min_rotor_clearance);
             }
 
             next_telemetry_t += telemetry_dt;

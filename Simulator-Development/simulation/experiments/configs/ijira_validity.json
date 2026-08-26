@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "random_seed": 20260825,
+  "dataset": "dataset/dataset_all.csv",
+  "offline_split": {"train": 240, "validation": 30, "test": 30},
+  "controller_validation_seeds": [301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330],
+  "controller_test_seeds": [331,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360],
+  "duration_s": 60.0,
+  "analysis_start_s": 10.0,
+  "target_agl_m": 0.22,
+  "low_clearance_m": 0.15,
+  "controller_modes": ["none", "analytical", "oracle", "ml_direct", "ml"],
+  "oracle_biases": [-0.02, -0.01, 0.0, 0.01, 0.02],
+  "oracle_pulse": {"start_s": 30.0, "duration_s": 0.25, "biases": [-0.02, 0.0, 0.02]},
+  "asymmetric_clamp_deltas": [0.0, 0.005, 0.01, 0.02, 0.04],
+  "robustness": {
+    "slope_exponents": [0.5, 1.0, 2.0],
+    "curvature_gains": [0.3, 0.6, 0.9],
+    "default": {"slope_exponent": 1.0, "curvature_gain": 0.6}
+  },
+  "bootstrap": {"resamples": 20000, "seed": 20260825}
+}

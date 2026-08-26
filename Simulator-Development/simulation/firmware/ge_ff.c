@@ -35,6 +35,9 @@ ge_ff_mode_t ge_ff_mode_from_env(void) {
     if (!strcasecmp(v, "ml") || !strcasecmp(v, "ai")) return GE_FF_MODE_ML;
     if (!strcasecmp(v, "ml_pure") || !strcasecmp(v, "pure_ml")) return GE_FF_MODE_ML_PURE;
     if (!strcasecmp(v, "ml_narrow") || !strcasecmp(v, "narrowed")) return GE_FF_MODE_ML_NARROW;
+    if (!strcasecmp(v, "oracle")) return GE_FF_MODE_ORACLE;
+    if (!strcasecmp(v, "ml_direct") || !strcasecmp(v, "pure_mlp")) return GE_FF_MODE_ML_DIRECT;
+    if (!strcasecmp(v, "ml_asym_clamp") || !strcasecmp(v, "asym_clamp")) return GE_FF_MODE_ML_ASYM_CLAMP;
     return GE_FF_MODE_ANALYTICAL;
 }
 
@@ -83,4 +86,14 @@ ge_ff_source_t ge_ff_select(double analytical, double ai_pred, double band_frac,
     }
     *out_factor = 1.0;
     return GE_FF_SRC_DISABLED;
+}
+
+double ge_ff_compensate_throttle(double throttle_raw, double factor) {
+    if (!isfinite(factor) || factor <= 0.0) return NAN;
+    return throttle_raw / sqrt(factor);
+}
+
+double ge_ff_asym_clamp_delta_from_env(void) {
+    const char *v = getenv("GE_ASYM_CLAMP_DELTA");
+    return v ? strtod(v, NULL) : 0.02;
 }

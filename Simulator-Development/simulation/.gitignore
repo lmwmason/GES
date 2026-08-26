@@ -6,3 +6,9 @@ __pycache__/
 *.pyc
 .venv/
 .idea/
+# Raw experiment telemetry/logs and binary estimators are reproducible but can
+# be very large. CSV/JSON summaries and publication figures remain reviewable.
+experiments/results/**/raw/
+experiments/results/**/logs/
+experiments/results/**/*.joblib
+experiments/results/**/*.csv.gz

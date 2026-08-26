@@ -1,0 +1,4 @@
+split,rows,seeds
+train,864240,240
+validation,108030,30
+test,108030,30

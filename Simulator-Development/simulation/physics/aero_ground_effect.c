@@ -2,6 +2,14 @@
 #include "terrain.h"
 #include <math.h>
 
+static double g_slope_exponent = 1.0;
+static double g_curvature_gain = 0.6;
+
+void ge_configure(double slope_exponent, double curvature_gain) {
+    g_slope_exponent = slope_exponent > 0.0 ? slope_exponent : 1.0;
+    g_curvature_gain = curvature_gain >= 0.0 ? curvature_gain : 0.6;
+}
+
 ge_result_t ge_compute(vec3_t rotor_world_pos, double rotor_radius_m) {
     ge_result_t r;
 
@@ -24,7 +32,7 @@ ge_result_t ge_compute(vec3_t rotor_world_pos, double rotor_radius_m) {
      * the IGE benefit, so scale the augmentation down with slope angle.
      * Heuristic extension -- not from a specific validated dataset;
      * an exact answer would require a CFD solve. */
-    double augmentation = (factor_flat - 1.0) * cos(slope);
+    double augmentation = (factor_flat - 1.0) * pow(fmax(0.0, cos(slope)), g_slope_exponent);
 
     double kappa = terrain_curvature(rotor_world_pos.x, rotor_world_pos.y);
     r.curvature = kappa;
@@ -33,8 +41,7 @@ ge_result_t ge_compute(vec3_t rotor_world_pos, double rotor_radius_m) {
      * convex ground (dome, kappa<0) lets it spill off the sides and
      * reduces it. Gain tuned so curvature radii ~ rotor radius give an
      * O(1) correction, decaying for gentler curves. */
-    double curv_gain = 0.6;
-    double factor_curv = 1.0 + curv_gain * kappa * rotor_radius_m * rotor_radius_m;
+    double factor_curv = 1.0 + g_curvature_gain * kappa * rotor_radius_m * rotor_radius_m;
     factor_curv = clampd(factor_curv, 0.5, 1.8);
 
     double factor = 1.0 + augmentation * factor_curv;

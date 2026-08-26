@@ -1,0 +1,95 @@
+# IJIRA experimental-validity suite
+
+This suite writes every run to a new timestamped directory under
+`experiments/results/ijira_validity/`. It never edits the manuscript or the
+legacy block-split results. The legacy procedure remains available through
+the original `ml/train_models.py` and `ml/train_all_models.py`; all outputs
+from this suite are explicitly seed-wise.
+
+The registered configuration is `configs/ijira_validity.json`. Its seed lists
+are chosen before outcomes are inspected: offline seeds 1--300 are shuffled
+with Python `random.Random(20260825)` into 240/30/30 groups, controller clamp
+validation uses 301--330, and the final controller set uses 331--360. Thus no
+closed-loop seed participates in model training, validation, or offline test.
+The oracle is diagnostic and cannot be deployed because it receives the
+simulator's ground-truth GE multiplier.
+
+## Environment and tests
+
+Run from `Simulator-Development/simulation`:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r ml/requirements.txt
+cmake -S . -B build
+cmake --build build -j2
+ctest --test-dir build --output-on-failure
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+## Registered experiment order
+
+Use explicit run IDs to make paths easy to cite. Do not tune the asymmetric
+clamp on seeds 331--360.
+
+```sh
+.venv/bin/python experiments/run.py split --run-id seed_split_20260825
+.venv/bin/python experiments/run.py offline --run-id offline_seedwise_20260825 --offline-models all --offline-epochs 25
+.venv/bin/python experiments/run.py clamp-validation --run-id clamp_validation_20260825
+# Read selected_clamp.json, freeze it, then substitute D below.
+.venv/bin/python experiments/run.py closed-loop --run-id closed_loop_30seed_20260825 --clamp-delta D
+.venv/bin/python experiments/run.py bias --run-id oracle_bias_30seed_20260825
+.venv/bin/python experiments/run.py robustness --run-id robustness_30seed_20260825_complete --clamp-delta D --workers 4
+```
+
+The closed-loop command always runs none, analytical, oracle, direct/pure MLP,
+and the existing hybrid MLP on exactly the same 30 seeds. Supplying the frozen
+clamp delta adds the asymmetric-clamp controller. A failed simulator process
+is retained in `failures.json` and aborts aggregation; it is never silently
+dropped. Each successful raw telemetry CSV is gzip-compressed and SHA-256
+recorded in `run_manifest.json`.
+
+Generate publication-quality derivative artifacts without changing LaTeX:
+
+```sh
+.venv/bin/python experiments/collect_offline.py --runs \
+  experiments/results/ijira_validity/offline_seedwise_analytical_gb_20260825 \
+  experiments/results/ijira_validity/offline_seedwise_rf_20260825 \
+  experiments/results/ijira_validity/offline_seedwise_linear_tree_20260826 \
+  experiments/results/ijira_validity/offline_seedwise_mlp_25epoch_20260826 \
+  experiments/results/ijira_validity/offline_seedwise_lstm_25epoch_20260826 \
+  experiments/results/ijira_validity/offline_seedwise_transformer_25epoch_20260826 \
+  --out-dir experiments/results/ijira_validity/offline_seedwise_final_20260826
+.venv/bin/python experiments/report.py \
+  --offline experiments/results/ijira_validity/offline_seedwise_final_20260826 \
+  --closed-loop experiments/results/ijira_validity/closed_loop_30seed_20260825 \
+  --bias experiments/results/ijira_validity/oracle_bias_30seed_20260825 \
+  --robustness experiments/results/ijira_validity/robustness_30seed_20260825_complete \
+  --out-dir experiments/results/ijira_validity/publication_20260825
+```
+
+Primary outcomes are post-transient body-center AGL RMS and low-clearance
+violation duration/event count. Safety clearance is the minimum of four rotor
+clearances. Gyroscope RMS, minimum/p05 clearance, and the legacy full-duration
+AGL RMS are exploratory. Paired differences are `mode_a - mode_b`; tables
+include t intervals, deterministic 20,000-resample bootstrap intervals, and
+paired Cohen's dz. Robustness comparisons remain separated by their registered
+slope-exponent/curvature-gain condition.
+
+## Loop-closure diagnostic
+
+This uses the existing hybrid trajectories and a predefined 0.25 s oracle
+bias pulse at 30 s. The learned model runs in shadow mode during the oracle
+experiment, so its error is observable but cannot affect the pulse response.
+
+```sh
+.venv/bin/python experiments/run.py pulse --run-id oracle_pulse_loop_closure_20260826
+.venv/bin/python experiments/loop_closure.py lagged \
+  --run-dir experiments/results/ijira_validity/closed_loop_30seed_20260825 \
+  --out-dir experiments/results/ijira_validity/loop_closure_lagged_20260826
+.venv/bin/python experiments/loop_closure.py pulse \
+  --run-dir experiments/results/ijira_validity/oracle_pulse_loop_closure_20260826 \
+  --out-dir experiments/results/ijira_validity/loop_closure_pulse_analysis_20260826
+.venv/bin/python experiments/loop_closure.py linearized \
+  --out-dir experiments/results/ijira_validity/loop_closure_linearized_20260826
+```

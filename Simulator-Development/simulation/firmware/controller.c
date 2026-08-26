@@ -27,6 +27,13 @@ typedef struct {
 } fc_state_t;
 
 static fc_state_t g;
+static double g_diag_oracle_truth = NAN;
+static double g_diag_oracle_bias = 0.0;
+
+void fc_set_diagnostic_ge_truth(double factor, double signed_bias) {
+    g_diag_oracle_truth = factor;
+    g_diag_oracle_bias = signed_bias;
+}
 
 void fc_init(void) {
     ae_init(&g.ae);
@@ -74,37 +81,53 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
     double throttle_raw = g.hover_cmd + throttle_trim;
 
     double analytical = ge_ff_analytical_factor(in->rangefinder_alt);
+    /* Evaluate the learned model in every mode as a shadow diagnostic. In
+     * ORACLE mode it is logged but never controls an actuator, which lets a
+     * pulse experiment test whether the perturbed trajectory subsequently
+     * changes learned-model error after the oracle bias has returned to zero. */
+    double ml_features[GE_FF_ML_N_FEATURES] = {
+        in->gyro[0], in->gyro[1], in->gyro[2], in->rangefinder_alt,
+        in->motor_rpm_meas[0], in->motor_rpm_meas[1], in->motor_rpm_meas[2], in->motor_rpm_meas[3],
+        in->motor_current[0], in->motor_current[1], in->motor_current[2], in->motor_current[3],
+        g.dbg.thrust_cmd_norm,
+    };
+    double ai_pred = ge_ff_ml_predict(ml_features);
     double ge_factor = 1.0;
     ge_ff_source_t src;
+    int factor_clamped = 0;
 
     switch (g.ge_ff_mode) {
     case GE_FF_MODE_NONE:
         ge_factor = 1.0;
         src = GE_FF_SRC_DISABLED;
-        g.dbg.ge_ff_ai = NAN;
         break;
     case GE_FF_MODE_ANALYTICAL:
         ge_factor = analytical;
         src = GE_FF_SRC_ANALYTICAL;
-        g.dbg.ge_ff_ai = NAN;
+        break;
+    case GE_FF_MODE_ORACLE:
+        if (!isfinite(g_diag_oracle_truth)) {
+            ge_factor = 1.0;
+            src = GE_FF_SRC_DISABLED;
+        } else {
+            double requested = g_diag_oracle_truth + g_diag_oracle_bias;
+            ge_factor = clampd(requested, 0.85, 1.6);
+            factor_clamped = ge_factor != requested;
+            src = GE_FF_SRC_ORACLE;
+        }
         break;
     case GE_FF_MODE_ML:
     case GE_FF_MODE_ML_PURE:
     case GE_FF_MODE_ML_NARROW:
+    case GE_FF_MODE_ML_DIRECT:
+    case GE_FF_MODE_ML_ASYM_CLAMP:
     default: {
         /* Feature order must match ge_ff_ml_weights.h exactly. thrust_cmd_norm
          * is the *previous* tick's g.dbg value (this tick's throttle_cmd is
          * what we're computing right now, so it can't be its own input --
          * the two are close enough tick-to-tick at 60Hz that the one-tick
          * lag costs negligible accuracy, see docs/research_report.md). */
-        double features[GE_FF_ML_N_FEATURES] = {
-            in->gyro[0], in->gyro[1], in->gyro[2], in->rangefinder_alt,
-            in->motor_rpm_meas[0], in->motor_rpm_meas[1], in->motor_rpm_meas[2], in->motor_rpm_meas[3],
-            in->motor_current[0], in->motor_current[1], in->motor_current[2], in->motor_current[3],
-            g.dbg.thrust_cmd_norm,
-        };
-        double ai_pred = ge_ff_ml_predict(features);
-        if (g.ge_ff_mode == GE_FF_MODE_ML &&
+        if ((g.ge_ff_mode == GE_FF_MODE_ML || g.ge_ff_mode == GE_FF_MODE_ML_ASYM_CLAMP) &&
             in->rangefinder_alt < GE_FF_LOW_CLEARANCE_M) {
             /* Don't just tighten the trust band here: ge_ff_select()'s
              * reject path sets factor=1.0 (no compensation at all), which
@@ -115,11 +138,31 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
             ge_factor = analytical;
             src = GE_FF_SRC_ANALYTICAL;
         } else {
-            double band = g.ge_ff_mode == GE_FF_MODE_ML_NARROW
-                        ? GE_FF_NARROW_TRUST_BAND : GE_FF_TRUST_BAND;
-            src = ge_ff_select(analytical, ai_pred, band, &ge_factor);
+            if (g.ge_ff_mode == GE_FF_MODE_ML_DIRECT) {
+                if (isfinite(ai_pred)) {
+                    ge_factor = ai_pred;
+                    src = GE_FF_SRC_AI;
+                } else {
+                    ge_factor = 1.0;
+                    src = GE_FF_SRC_DISABLED;
+                }
+            } else if (g.ge_ff_mode == GE_FF_MODE_ML_ASYM_CLAMP) {
+                if (isfinite(ai_pred)) {
+                    double delta = ge_ff_asym_clamp_delta_from_env();
+                    double cap = analytical + fmax(0.0, delta);
+                    ge_factor = fmin(ai_pred, cap);
+                    factor_clamped = ge_factor < ai_pred;
+                    src = GE_FF_SRC_AI;
+                } else {
+                    ge_factor = 1.0;
+                    src = GE_FF_SRC_DISABLED;
+                }
+            } else {
+                double band = g.ge_ff_mode == GE_FF_MODE_ML_NARROW
+                            ? GE_FF_NARROW_TRUST_BAND : GE_FF_TRUST_BAND;
+                src = ge_ff_select(analytical, ai_pred, band, &ge_factor);
+            }
         }
-        g.dbg.ge_ff_ai = ai_pred;
         break;
     }
     }
@@ -129,14 +172,19 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
         /* Motor thrust is proportional to rpm^2 while rpm is proportional
          * to throttle command. Cancel the expected thrust augmentation by
          * scaling rpm (and therefore throttle) by 1/sqrt(ge_factor). */
-        throttle_cmd = throttle_raw / sqrt(ge_factor);
+        throttle_cmd = ge_ff_compensate_throttle(throttle_raw, ge_factor);
     }
     throttle_cmd = clampd(throttle_cmd, 0.0, 1.0);
 
     mixer_compute(throttle_cmd, roll_cmd, pitch_cmd, yaw_cmd, out->motor_cmd);
 
     g.dbg.ge_ff_analytical = analytical;
+    g.dbg.ge_ff_ai = ai_pred;
+    g.dbg.ge_ff_applied = ge_factor;
+    g.dbg.ge_oracle_truth = g_diag_oracle_truth;
+    g.dbg.ge_oracle_bias = g_diag_oracle_bias;
     g.dbg.ge_ff_source = (int)src;
+    g.dbg.ge_ff_clamped = factor_clamped;
     g.dbg.thrust_cmd_norm = throttle_cmd;
 
 #ifdef FC_DEBUG_PRINT

@@ -24,11 +24,20 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out);
 typedef struct {
     double ge_ff_analytical;
     double ge_ff_ai;
+    double ge_ff_applied;
+    double ge_oracle_truth;
+    double ge_oracle_bias;
     int    ge_ff_source;
+    int    ge_ff_clamped;
     double thrust_cmd_norm;
 } fc_debug_t;
 
 void fc_get_debug(fc_debug_t *out);
+
+/* Diagnostic-only simulator hook. Ground truth never enters sensor_packet_t
+ * and is unavailable on real hardware. The simulator calls this immediately
+ * before fc_step() when an oracle experiment is requested. */
+void fc_set_diagnostic_ge_truth(double factor, double signed_bias);
 
 #ifdef __cplusplus
 }

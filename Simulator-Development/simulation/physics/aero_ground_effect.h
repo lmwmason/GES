@@ -17,5 +17,6 @@ typedef struct {
 } ge_result_t;
 
 ge_result_t ge_compute(vec3_t rotor_world_pos, double rotor_radius_m);
+void ge_configure(double slope_exponent, double curvature_gain);
 
 #endif

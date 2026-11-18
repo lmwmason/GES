@@ -54,6 +54,31 @@ python experiments/run.py bandwidth --run-id reviewer_feedback_bandwidth_2026111
 Run `clamp-validation` on seeds 301--330 and freeze its selected value before
 any final-seed clamp or robustness run. Never tune that value on seeds 331--360.
 
+Additional reviewer diagnostics:
+
+```bash
+python experiments/run.py oracle-timing --run-id oracle_timing_30seed --workers 20
+python experiments/run.py base-model --run-id base_model_30seed --workers 30
+python experiments/run.py ml-pulse --run-id ml_active_pulse_grid --workers 30
+python experiments/ml_pulse_analysis.py \
+  --run-dir experiments/results/ijira_validity/ml_active_pulse_grid \
+  --out-dir experiments/results/ijira_validity/ml_active_pulse_analysis
+python experiments/loop_closure.py frequency \
+  --out-dir experiments/results/ijira_validity/frequency_stability
+python experiments/terrain_decomposition.py \
+  --dataset dataset/reviewer_corrected_20261119/dataset_all.csv \
+  --offline-dir experiments/results/reviewer_revision_20261119/offline_common_support \
+  --out-dir experiments/results/ijira_validity/terrain_decomposition
+```
+
+`oracle-timing` compares current-factor cancellation with a diagnostic 100 ms
+constant-velocity terrain preview; the latter is not claimed to be exact future
+state knowledge. `base-model` compares the original Cheeseman--Bennett base
+against the NASA NDARC Hayden empirical induced-power model at the same default
+slope/curvature correction (NASA TP-20220000355, Section 12.4.1.2).
+`ml-pulse` perturbs the actively
+deployed learned factor, not a non-actuating shadow predictor.
+
 ## Environment and tests
 
 Run from `Simulator-Development/simulation`:

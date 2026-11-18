@@ -1,0 +1,9 @@
+bias_magnitude,metric,mean_positive_minus_negative,n
+0.01,agl_rms_primary,-0.000165687001789077,30
+0.01,low_clearance_duration_s,0.15413333333332843,30
+0.01,minimum_clearance_m,2.7000000000000172e-05,30
+0.01,p05_clearance_m,-0.0013856666666666646,30
+0.02,agl_rms_primary,-0.0003513287180359051,30
+0.02,low_clearance_duration_s,0.325833333333323,30
+0.02,minimum_clearance_m,2.200000000000026e-05,30
+0.02,p05_clearance_m,-0.002571333333333332,30

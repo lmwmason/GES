@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from scipy import stats
 
 
 def require(path: Path, columns: set[str]) -> pd.DataFrame:
@@ -37,21 +38,30 @@ def main():
             agl_rms_sd=("agl_rms_primary", "std"), gyro_rms_mean=("gyro_rms", "mean"),
             minimum_clearance_m=("minimum_clearance_m", "min"),
             violation_duration_mean_s=("low_clearance_duration_s", "mean")).reset_index()
+        summary["agl_rms_ci95"] = stats.t.ppf(.975, summary.n - 1) * summary.agl_rms_sd / summary.n.pow(.5)
         summary.to_csv(args.out_dir / "closed_loop_table.csv", index=False)
-        ax = df.groupby("mode").agl_rms_primary.agg(["mean", "sem"]).plot.bar(
-            y="mean", yerr="sem", legend=False, capsize=3, color="#4472C4")
+        ax = summary.plot.bar(x="mode", y="agl_rms_mean", yerr="agl_rms_ci95",
+            legend=False, capsize=3, color="#4472C4")
         ax.set(xlabel="Controller", ylabel="AGL tracking RMS (m)")
         plt.tight_layout(); plt.savefig(args.out_dir / "closed_loop_agl_rms.png"); plt.close()
 
     if args.bias:
         df = require(args.bias / "per_seed_metrics.csv", {"oracle_bias", "agl_rms_primary", "minimum_clearance_m"})
-        summary = df.groupby("oracle_bias").agg(
+        summary = df.groupby("oracle_bias").agg(n=("seed","count"),
             agl_rms_mean=("agl_rms_primary", "mean"), agl_rms_sem=("agl_rms_primary", "sem"),
+            p05_clearance_mean=("p05_clearance_m","mean"), p05_clearance_sem=("p05_clearance_m","sem"),
+            violation_duration_mean=("low_clearance_duration_s","mean"),
+            violation_duration_sem=("low_clearance_duration_s","sem"),
             minimum_clearance_mean=("minimum_clearance_m", "mean")).reset_index()
+        tcrit = stats.t.ppf(.975, summary.n - 1)
         summary.to_csv(args.out_dir / "oracle_bias_table.csv", index=False)
-        fig, ax = plt.subplots(); ax.errorbar(summary.oracle_bias, summary.agl_rms_mean,
-            yerr=summary.agl_rms_sem, marker="o", capsize=3)
-        ax.axvline(0, color="0.5", lw=.8); ax.set(xlabel="Signed oracle GE-factor bias", ylabel="AGL tracking RMS (m)")
+        fig, axes = plt.subplots(1,3,figsize=(9,3))
+        panels=(("agl_rms_mean","agl_rms_sem","AGL tracking RMS (m)"),
+                ("p05_clearance_mean","p05_clearance_sem","5th-percentile clearance (m)"),
+                ("violation_duration_mean","violation_duration_sem","Low-clearance duration (s)"))
+        for ax,(mean,sem,label) in zip(axes,panels):
+            ax.errorbar(summary.oracle_bias,summary[mean],yerr=tcrit*summary[sem],marker="o",capsize=3)
+            ax.axvline(0,color="0.5",lw=.8); ax.set(xlabel="Signed oracle GE-factor bias",ylabel=label)
         fig.tight_layout(); fig.savefig(args.out_dir / "oracle_bias_intervention.png"); plt.close(fig)
 
     if args.offline:

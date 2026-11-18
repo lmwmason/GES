@@ -1,0 +1,4 @@
+,agl_rms_primary,agl_rms_primary,low_clearance_duration_s,low_clearance_duration_s,low_clearance_events,low_clearance_events,gyro_rms,gyro_rms,minimum_clearance_m,minimum_clearance_m,p05_clearance_m,p05_clearance_m
+,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std
+mode,,,,,,,,,,,,
+ml_asym_clamp,0.059872231215342395,0.011423592463558861,4.300433333333197,1.296900062172973,27.533333333333335,6.765701193791975,0.05440064802435871,0.015258869861718509,0.06374899999999999,0.0010866219404095027,0.13412833333333332,0.011126060455721423

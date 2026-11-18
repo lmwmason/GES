@@ -11,6 +11,10 @@
 #include <math.h>
 #include <stdio.h>
 
+/* Avoid <stdlib.h>'s POSIX pid_t, which conflicts with this firmware's
+ * historical PID-controller typedef. */
+extern char *getenv(const char *name);
+
 /* This file is the whole "external firmware": everything it knows comes
  * through sensor_packet_t, everything it produces is actuator_packet_t.
  * It is built as libfc.so and dlopen()'d by the simulator (see sim/main.c)
@@ -51,7 +55,17 @@ void fc_init(void) {
     /* altitude hold: meters error -> normalized throttle trim around hover.
      * Rangefinder is noisy relative to the 1kHz loop rate, so the D term
      * needs a much heavier filter than the rate loops. */
-    pid_init(&g.pid_alt, 0.60, 0.15, 0.25, 0.20, 0.40, 0.15);
+    double alt_gain_scale = 1.0;
+    const char *alt_scale_env = getenv("ALT_PID_GAIN_SCALE");
+    if (alt_scale_env) {
+        double requested;
+        char trailing;
+        if (sscanf(alt_scale_env, "%lf%c", &requested, &trailing) == 1 &&
+            isfinite(requested) && requested > 0.0 && requested <= 2.0)
+            alt_gain_scale = requested;
+    }
+    pid_init(&g.pid_alt, 0.60 * alt_gain_scale, 0.15 * alt_gain_scale,
+             0.25 * alt_gain_scale, 0.20, 0.40, 0.15);
 
     double hover_thrust_per_motor = (DP_MASS_KG * DP_GRAVITY) / 4.0;
     double hover_rpm = sqrt(hover_thrust_per_motor / DP_MOTOR_KT);

@@ -1,0 +1,107 @@
+[data] loaded 1080300 rows, 300 episode(s), t in [0.0, 60.0]s
+[data] inferred dt=17.0ms -> lead_s=0.100s is 6 row(s) ahead
+[offline] linear {'model': 'linear', 'train_s': 0.18507647514343262, 'n_test': 106920, 'MAE': 0.012111566960811615, 'RMSE': 0.02123181132218722, 'R2': 0.3438912034034729}
+[offline] tree {'model': 'tree', 'train_s': 11.92828631401062, 'n_test': 106920, 'MAE': 0.006490201010186029, 'RMSE': 0.014672084359931671, 'R2': 0.6866819455062649}
+[offline] rf {'model': 'rf', 'train_s': 21.297828674316406, 'n_test': 106920, 'MAE': 0.006079103783352906, 'RMSE': 0.013926675397985607, 'R2': 0.717709217996771}
+[offline] gb {'model': 'gb', 'train_s': 2.616337537765503, 'n_test': 106920, 'MAE': 0.006219415443868108, 'RMSE': 0.014057028125338262, 'R2': 0.7124000422271708}
+[offline] MLP epoch 1/25 val_rmse=0.016422
+[offline] MLP epoch 2/25 val_rmse=0.015435
+[offline] MLP epoch 3/25 val_rmse=0.015983
+[offline] MLP epoch 4/25 val_rmse=0.014701
+[offline] MLP epoch 5/25 val_rmse=0.014441
+[offline] MLP epoch 6/25 val_rmse=0.014344
+[offline] MLP epoch 7/25 val_rmse=0.014009
+[offline] MLP epoch 8/25 val_rmse=0.014241
+[offline] MLP epoch 9/25 val_rmse=0.013731
+[offline] MLP epoch 10/25 val_rmse=0.013876
+[offline] MLP epoch 11/25 val_rmse=0.013923
+[offline] MLP epoch 12/25 val_rmse=0.014776
+[offline] MLP epoch 13/25 val_rmse=0.013938
+[offline] MLP epoch 14/25 val_rmse=0.013914
+[offline] MLP epoch 15/25 val_rmse=0.013870
+[offline] range_mlp epoch 1/25 val_rmse=0.014921
+[offline] range_mlp epoch 2/25 val_rmse=0.015752
+[offline] range_mlp epoch 3/25 val_rmse=0.013861
+[offline] range_mlp epoch 4/25 val_rmse=0.014393
+[offline] range_mlp epoch 5/25 val_rmse=0.014578
+[offline] range_mlp epoch 6/25 val_rmse=0.013068
+[offline] range_mlp epoch 7/25 val_rmse=0.012589
+[offline] range_mlp epoch 8/25 val_rmse=0.012461
+[offline] range_mlp epoch 9/25 val_rmse=0.012741
+[offline] range_mlp epoch 10/25 val_rmse=0.011835
+[offline] range_mlp epoch 11/25 val_rmse=0.012060
+[offline] range_mlp epoch 12/25 val_rmse=0.011699
+[offline] range_mlp epoch 13/25 val_rmse=0.011456
+[offline] range_mlp epoch 14/25 val_rmse=0.011730
+[offline] range_mlp epoch 15/25 val_rmse=0.011491
+[offline] range_mlp epoch 16/25 val_rmse=0.011099
+[offline] range_mlp epoch 17/25 val_rmse=0.012157
+[offline] range_mlp epoch 18/25 val_rmse=0.011135
+[offline] range_mlp epoch 19/25 val_rmse=0.011221
+[offline] range_mlp epoch 20/25 val_rmse=0.011146
+[offline] range_mlp epoch 21/25 val_rmse=0.010959
+[offline] range_mlp epoch 22/25 val_rmse=0.011095
+[offline] range_mlp epoch 23/25 val_rmse=0.011536
+[offline] range_mlp epoch 24/25 val_rmse=0.011056
+[offline] range_mlp epoch 25/25 val_rmse=0.010953
+[offline] lstm epoch 1/25 val_rmse=0.013774
+[offline] lstm epoch 2/25 val_rmse=0.012120
+[offline] lstm epoch 3/25 val_rmse=0.012349
+[offline] lstm epoch 4/25 val_rmse=0.010630
+[offline] lstm epoch 5/25 val_rmse=0.009904
+[offline] lstm epoch 6/25 val_rmse=0.009491
+[offline] lstm epoch 7/25 val_rmse=0.009553
+[offline] lstm epoch 8/25 val_rmse=0.009707
+[offline] lstm epoch 9/25 val_rmse=0.008628
+[offline] lstm epoch 10/25 val_rmse=0.008245
+[offline] lstm epoch 11/25 val_rmse=0.008400
+[offline] lstm epoch 12/25 val_rmse=0.007992
+[offline] lstm epoch 13/25 val_rmse=0.007999
+[offline] lstm epoch 14/25 val_rmse=0.008182
+[offline] lstm epoch 15/25 val_rmse=0.007801
+[offline] lstm epoch 16/25 val_rmse=0.007563
+[offline] lstm epoch 17/25 val_rmse=0.007772
+[offline] lstm epoch 18/25 val_rmse=0.007778
+[offline] lstm epoch 19/25 val_rmse=0.008331
+[offline] lstm epoch 20/25 val_rmse=0.008094
+[offline] lstm epoch 21/25 val_rmse=0.007395
+[offline] lstm epoch 22/25 val_rmse=0.007592
+[offline] lstm epoch 23/25 val_rmse=0.007127
+[offline] lstm epoch 24/25 val_rmse=0.007414
+[offline] lstm epoch 25/25 val_rmse=0.007380
+[offline] transformer epoch 1/25 val_rmse=0.016051
+[offline] transformer epoch 2/25 val_rmse=0.012557
+[offline] transformer epoch 3/25 val_rmse=0.011606
+[offline] transformer epoch 4/25 val_rmse=0.010956
+[offline] transformer epoch 5/25 val_rmse=0.010455
+[offline] transformer epoch 6/25 val_rmse=0.009564
+[offline] transformer epoch 7/25 val_rmse=0.009403
+[offline] transformer epoch 8/25 val_rmse=0.009302
+[offline] transformer epoch 9/25 val_rmse=0.009108
+[offline] transformer epoch 10/25 val_rmse=0.008723
+[offline] transformer epoch 11/25 val_rmse=0.009221
+[offline] transformer epoch 12/25 val_rmse=0.008637
+[offline] transformer epoch 13/25 val_rmse=0.008758
+[offline] transformer epoch 14/25 val_rmse=0.008583
+[offline] transformer epoch 15/25 val_rmse=0.008617
+[offline] transformer epoch 16/25 val_rmse=0.008913
+[offline] transformer epoch 17/25 val_rmse=0.008272
+[offline] transformer epoch 18/25 val_rmse=0.008690
+[offline] transformer epoch 19/25 val_rmse=0.008507
+[offline] transformer epoch 20/25 val_rmse=0.008587
+[offline] transformer epoch 21/25 val_rmse=0.008624
+[offline] transformer epoch 22/25 val_rmse=0.008437
+[offline] transformer epoch 23/25 val_rmse=0.008093
+[offline] transformer epoch 24/25 val_rmse=0.008437
+[offline] transformer epoch 25/25 val_rmse=0.008389
+                model    train_s  n_test      MAE     RMSE        R2
+                 LSTM 467.077969  106920 0.003333 0.007417  0.919927
+          TRANSFORMER 775.779286  106920 0.003741 0.008458  0.895880
+ Rangefinder-only MLP 354.032865  106920 0.005133 0.011421  0.810154
+                   rf  21.297829  106920 0.006079 0.013927  0.717709
+                  MLP 151.853924  106920 0.006420 0.014010  0.714331
+                   gb   2.616338  106920 0.006219 0.014057  0.712400
+                 tree  11.928286  106920 0.006490 0.014672  0.686682
+               linear   0.185076  106920 0.012112 0.021232  0.343891
+           Analytical   0.000000  106920 0.010253 0.024537  0.123749
+Predictive analytical   0.000000  106920 0.021673 0.057712 -3.847702

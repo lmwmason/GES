@@ -14,6 +14,46 @@ closed-loop seed participates in model training, validation, or offline test.
 The oracle is diagnostic and cannot be deployed because it receives the
 simulator's ground-truth GE multiplier.
 
+## Major-revision corrected-dynamics rerun
+
+The reviewer rerun is written to a new directory. Dataset generation refuses
+to reuse a non-empty output directory. The data-collection controller is fixed
+before outcomes are inspected (`analytical`), seeds 1--300 are offline-only,
+and controller seeds 331--360 remain unseen.
+
+```bash
+python experiments/generate_corrected_dataset.py \
+  --out-dir dataset/reviewer_corrected_20261119 \
+  --start-seed 1 --n-seeds 300 --duration 60 --workers 32 --mode analytical
+python experiments/offline_seedwise.py \
+  --config experiments/configs/ijira_validity.json \
+  --dataset dataset/reviewer_corrected_20261119/dataset_all.csv \
+  --out-dir experiments/results/reviewer_revision_20261119/offline_common_support \
+  --epochs 25 --models all --device cuda
+```
+
+Every model in this rerun uses the same 32-tick warm-up and identical 100
+ms-ahead target rows. Instantaneous analytical, constant-velocity predictive
+analytical, rangefinder-only MLP, full-sensor models, LSTM and Transformer are
+therefore scored against one truth vector. `pointwise_predictions.csv.gz`
+records seed, source time and target time for auditability.
+
+```bash
+python ml/export_mlp_to_c.py \
+  --joblib experiments/results/reviewer_revision_20261119/offline_common_support/models.joblib \
+  --out firmware/ge_ff_ml_weights.h
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+python experiments/run.py closed-loop --run-id reviewer_corrected_closed_loop_20261119
+python experiments/run.py bias --run-id reviewer_corrected_bias_20261119
+python experiments/run.py oracle-aggregation --run-id reviewer_oracle_aggregation_20261119 --workers 16
+python experiments/run.py bandwidth --run-id reviewer_feedback_bandwidth_20261119 --workers 16
+```
+
+Run `clamp-validation` on seeds 301--330 and freeze its selected value before
+any final-seed clamp or robustness run. Never tune that value on seeds 331--360.
+
 ## Environment and tests
 
 Run from `Simulator-Development/simulation`:

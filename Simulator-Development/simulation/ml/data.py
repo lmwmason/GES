@@ -232,3 +232,39 @@ def build_pointwise_xy(df: pd.DataFrame, lead_rows: int = 0,
     b = np.array(b_list)
     out_extra = {c: np.array(v, dtype=np.float32) for c, v in extra_lists.items()}
     return X, y, b, out_extra
+
+
+def build_common_support(df: pd.DataFrame, window: int, lead_rows: int,
+                         feature_cols=FEATURE_COLS, target_col=TARGET_COL,
+                         extra_cols=()):
+    """Return point inputs and labels on exactly the sequence-model support.
+
+    Every retained example has ``window`` history rows from one terrain seed;
+    the point input and extras come from the final history row and the label
+    comes ``lead_rows`` later.  Keeping the source/target row indices makes it
+    possible to prove that analytical, pointwise and sequence models were
+    scored on identical observations.
+    """
+    rows = []
+    for seed, group in df.groupby("seed", sort=True):
+        idx = group.index.to_numpy()
+        if len(idx) < window + lead_rows:
+            continue
+        for end in range(window - 1, len(idx) - lead_rows):
+            rows.append((int(seed), int(idx[end]), int(idx[end + lead_rows])))
+    if not rows:
+        raise ValueError("no common-support samples; check window and lead")
+    source_idx = np.asarray([r[1] for r in rows], dtype=np.int64)
+    target_idx = np.asarray([r[2] for r in rows], dtype=np.int64)
+    source = df.loc[source_idx]
+    target = df.loc[target_idx]
+    return {
+        "X": source[list(feature_cols)].to_numpy(np.float32),
+        "y": target[target_col].to_numpy(np.float32),
+        "extra": {c: source[c].to_numpy(np.float32) for c in extra_cols},
+        "seed": np.asarray([r[0] for r in rows], dtype=np.int64),
+        "source_index": source_idx,
+        "target_index": target_idx,
+        "source_t": source["t"].to_numpy(float),
+        "target_t": target["t"].to_numpy(float),
+    }

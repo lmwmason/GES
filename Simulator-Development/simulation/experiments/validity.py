@@ -123,22 +123,26 @@ def compute_metrics(df: pd.DataFrame, cfg: dict) -> dict:
 
 def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict,
                    oracle_bias=0.0, slope_exponent=1.0, curvature_gain=0.6,
-                   clamp_delta=None, pulse_start=None, pulse_duration=None) -> dict:
+                   clamp_delta=None, pulse_start=None, pulse_duration=None,
+                   altitude_gain_scale=1.0, oracle_aggregation="arithmetic") -> dict:
     raw_dir = out_dir / "raw"
     log_dir = out_dir / "logs"
     raw_dir.mkdir(parents=True, exist_ok=True); log_dir.mkdir(parents=True, exist_ok=True)
     pulse_tag = "" if pulse_start is None else f"_p{pulse_start:.2f}x{pulse_duration:.2f}"
-    tag = f"seed{seed}_{mode}_b{oracle_bias:+.3f}_s{slope_exponent:.2f}_c{curvature_gain:.2f}{pulse_tag}"
+    aggregation_tag = "_ow" if oracle_aggregation == "thrust-weighted" else ""
+    tag = f"seed{seed}_{mode}{aggregation_tag}_b{oracle_bias:+.3f}_s{slope_exponent:.2f}_c{curvature_gain:.2f}{pulse_tag}"
     tmp_csv = raw_dir / f"{tag}.csv"
     gz_csv = raw_dir / f"{tag}.csv.gz"
     cmd = [str(root / "build/bin/simulator"), "--fc", str(root / "build/bin/libfc.so"),
            "--seed", str(seed), "--duration", str(cfg["duration_s"]), "--fast", "--no-telemetry",
            "--csv", str(tmp_csv), "--oracle-bias", str(oracle_bias),
            "--ge-slope-exponent", str(slope_exponent), "--ge-curvature-gain", str(curvature_gain)]
+    cmd += ["--oracle-aggregation", oracle_aggregation]
     if pulse_start is not None:
         cmd += ["--oracle-pulse-start", str(pulse_start),
                 "--oracle-pulse-duration", str(pulse_duration)]
     env = os.environ.copy(); env["GE_FF_MODE"] = mode
+    env["ALT_PID_GAIN_SCALE"] = str(altitude_gain_scale)
     if clamp_delta is not None: env["GE_ASYM_CLAMP_DELTA"] = str(clamp_delta)
     proc = subprocess.run(cmd, cwd=root, env=env, text=True, capture_output=True, check=False)
     (log_dir / f"{tag}.stdout.txt").write_text(proc.stdout)
@@ -146,6 +150,8 @@ def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict
     record = {"tag": tag, "mode": mode, "seed": seed, "command": cmd,
               "oracle_bias": oracle_bias, "slope_exponent": slope_exponent,
               "curvature_gain": curvature_gain, "clamp_delta": clamp_delta,
+              "altitude_gain_scale": altitude_gain_scale,
+              "oracle_aggregation": oracle_aggregation,
               "pulse_start": pulse_start, "pulse_duration": pulse_duration,
               "returncode": proc.returncode, "status": "failed" if proc.returncode else "complete"}
     if proc.returncode:
@@ -168,7 +174,7 @@ def paired_statistics(metrics: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     rows = []
     rng = np.random.default_rng(cfg["bootstrap"]["seed"])
     n_boot = int(cfg["bootstrap"]["resamples"])
-    design_columns = [name for name in ("slope_exponent", "curvature_gain")
+    design_columns = [name for name in ("slope_exponent", "curvature_gain", "altitude_gain_scale")
                       if name in metrics and metrics[name].nunique(dropna=False) > 1]
     grouped = metrics.groupby(design_columns, dropna=False) if design_columns else [((), metrics)]
     for design_values, group in grouped:
@@ -190,8 +196,23 @@ def paired_statistics(metrics: pd.DataFrame, cfg: dict) -> pd.DataFrame:
                 boot = d[rng.integers(0, n, size=(n_boot, n))].mean(axis=1)
                 rows.append({**design, "mode_a": a, "mode_b": b, "metric": key, "n": n,
                              "mean_difference_a_minus_b": mean,
+                             "paired_t_p_raw": float(stats.ttest_1samp(d, 0.0).pvalue),
                              "t_ci_low": mean - tcrit * sem, "t_ci_high": mean + tcrit * sem,
                              "bootstrap_ci_low": float(np.quantile(boot, .025)),
                              "bootstrap_ci_high": float(np.quantile(boot, .975)),
                              "cohen_dz": mean / sd if sd > 0 else np.nan})
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    # Holm family-wise correction within each metric/design cell.  Raw and
+    # adjusted p-values are both retained; no comparison is silently dropped.
+    family = design_columns + ["metric"]
+    result["paired_t_p_holm"] = np.nan
+    grouper = family[0] if len(family) == 1 else family
+    for _, idx in result.groupby(grouper, dropna=False).groups.items():
+        ordered = result.loc[idx, "paired_t_p_raw"].sort_values().index.tolist()
+        m = len(ordered); running = 0.0
+        for rank, row_idx in enumerate(ordered):
+            running = max(running, (m - rank) * float(result.at[row_idx, "paired_t_p_raw"]))
+            result.at[row_idx, "paired_t_p_holm"] = min(1.0, running)
+    return result

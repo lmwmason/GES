@@ -1,0 +1,3 @@
+# Local vertical-axis model
+
+Operating point: level hover, zero vertical velocity, unsaturated actuators, constant GE factor. Motor dynamics are `tau_m r_dot + r = u`; vertical dynamics are `z_ddot = K_m r`; the altitude PID is `u = (Kp + Ki/s + Kd*s/(1+tau_d*s)) (z_ref-z)`. Parameters: mass=1.50 kg, gravity=9.81 m/s^2, KT=1.472e-7, rpm_max=9000, tau_m=0.030 s, Kp=0.60, Ki=0.15, Kd=0.25, tau_d=0.15 s. The CSV companion matrices reproduce every reported pole. This is local evidence only and excludes switching, clamps, mixer saturation, attitude estimation, terrain motion, and learned-model feedback; it does not prove nonlinear closed-loop stability.

@@ -13,11 +13,23 @@ ROOT = Path(__file__).resolve().parents[1]
 import sys
 sys.path[:0] = [str(ROOT), str(ROOT / "ml")]
 
-from data import assert_seed_splits_disjoint, seed_group_split
+from data import assert_seed_splits_disjoint, build_common_support, seed_group_split
 from experiments.validity import compute_metrics, load_config, paired_statistics, read_telemetry
 
 
 class SplitTests(unittest.TestCase):
+    def test_common_support_uses_identical_target_rows(self):
+        rows = []
+        features = ["gyro_x","gyro_y","gyro_z","rangefinder_alt","motor_rpm_0","motor_rpm_1","motor_rpm_2","motor_rpm_3","motor_current_0","motor_current_1","motor_current_2","motor_current_3","thrust_cmd_norm"]
+        for seed in (1, 2):
+            for i in range(8):
+                row = {"seed":seed,"t":i/60,"ge_factor_truth_mean":seed+i/100,"ge_ff_analytical":1.0}
+                row.update({c:float(i) for c in features}); rows.append(row)
+        support = build_common_support(pd.DataFrame(rows), window=3, lead_rows=2, extra_cols=["ge_ff_analytical"])
+        self.assertEqual(len(support["y"]), 8)
+        self.assertTrue(np.all(support["target_t"] > support["source_t"]))
+        self.assertEqual(set(support["seed"]), {1, 2})
+
     def test_seed_split_is_deterministic_and_disjoint(self):
         frame = pd.DataFrame({"seed": np.repeat(np.arange(1, 301), 2), "x": 1})
         first = seed_group_split(frame, random_seed=20260825)[3]
@@ -53,6 +65,8 @@ class ResultTests(unittest.TestCase):
         out = paired_statistics(pd.DataFrame(rows), self.cfg)
         self.assertEqual(set(out.n), {3})
         self.assertTrue(np.allclose(out.mean_difference_a_minus_b, -.1))
+        self.assertTrue({"paired_t_p_raw", "paired_t_p_holm"}.issubset(out.columns))
+        self.assertTrue((out.paired_t_p_holm >= out.paired_t_p_raw).all())
 
     def test_robustness_pairing_does_not_mix_design_cells(self):
         rows = []

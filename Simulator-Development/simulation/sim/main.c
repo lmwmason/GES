@@ -148,6 +148,7 @@ static void print_usage(const char *prog) {
         "Usage: %s [--fc PATH] [--host HOST] [--port PORT] [--duration SEC]\n"
         "          [--seed N] [--fast] [--no-telemetry] [--csv PATH]\n"
         "          [--oracle-bias X] [--oracle-pulse-start SEC] [--oracle-pulse-duration SEC]\n"
+        "          [--oracle-aggregation arithmetic|thrust-weighted]\n"
         "          [--ge-slope-exponent X] [--ge-curvature-gain X]\n"
         "  --fc PATH        path to the firmware shared object (default: auto-detected next to this binary)\n"
         "  --seed N         terrain seed (default 1); different seeds -> different irregular terrain\n"
@@ -157,6 +158,7 @@ static void print_usage(const char *prog) {
         "  --oracle-bias X  diagnostic signed bias added to oracle GE factor\n"
         "  --oracle-pulse-start SEC  apply oracle bias only after this time\n"
         "  --oracle-pulse-duration SEC  pulse width; requires pulse start\n"
+        "  --oracle-aggregation MODE  collective truth reduction (default arithmetic)\n"
         "  --ge-slope-exponent X  heuristic slope exponent (default 1.0)\n"
         "  --ge-curvature-gain X  heuristic curvature gain (default 0.6)\n",
         prog);
@@ -174,6 +176,7 @@ int main(int argc, char **argv) {
     double oracle_bias = 0.0;
     double oracle_pulse_start = -1.0;
     double oracle_pulse_duration = 0.0;
+    const char *oracle_aggregation = "arithmetic";
     double ge_slope_exponent = 1.0;
     double ge_curvature_gain = 0.6;
 
@@ -189,6 +192,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--oracle-bias") && i + 1 < argc) oracle_bias = atof(argv[++i]);
         else if (!strcmp(argv[i], "--oracle-pulse-start") && i + 1 < argc) oracle_pulse_start = atof(argv[++i]);
         else if (!strcmp(argv[i], "--oracle-pulse-duration") && i + 1 < argc) oracle_pulse_duration = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--oracle-aggregation") && i + 1 < argc) oracle_aggregation = argv[++i];
         else if (!strcmp(argv[i], "--ge-slope-exponent") && i + 1 < argc) ge_slope_exponent = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-curvature-gain") && i + 1 < argc) ge_curvature_gain = atof(argv[++i]);
         else if (!strcmp(argv[i], "--help")) { print_usage(argv[0]); return 0; }
@@ -197,6 +201,10 @@ int main(int argc, char **argv) {
     if ((oracle_pulse_start >= 0.0 && oracle_pulse_duration <= 0.0) ||
         (oracle_pulse_start < 0.0 && oracle_pulse_duration > 0.0)) {
         fprintf(stderr, "[sim] oracle pulse start and positive duration must be supplied together\n");
+        return 1;
+    }
+    if (strcmp(oracle_aggregation, "arithmetic") && strcmp(oracle_aggregation, "thrust-weighted")) {
+        fprintf(stderr, "[sim] invalid oracle aggregation: %s\n", oracle_aggregation);
         return 1;
     }
     if (!fc_path) fc_path = default_fc_path();
@@ -280,6 +288,15 @@ int main(int argc, char **argv) {
             oracle_truth[i] = ge.factor;
         }
         double oracle_mean = 0.25 * (oracle_truth[0] + oracle_truth[1] + oracle_truth[2] + oracle_truth[3]);
+        if (!strcmp(oracle_aggregation, "thrust-weighted")) {
+            double numerator = 0.0, denominator = 0.0;
+            for (int i = 0; i < 4; i++) {
+                double free_air_thrust = motor_thrust_N(rpm_now[i]);
+                numerator += free_air_thrust * oracle_truth[i];
+                denominator += free_air_thrust;
+            }
+            if (denominator > 1e-12) oracle_mean = numerator / denominator;
+        }
         double active_oracle_bias = oracle_bias;
         if (oracle_pulse_start >= 0.0 &&
             !(t >= oracle_pulse_start && t < oracle_pulse_start + oracle_pulse_duration))

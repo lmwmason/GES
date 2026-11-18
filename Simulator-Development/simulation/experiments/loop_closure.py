@@ -114,7 +114,7 @@ def linearized(args):
     motor_tau, deriv_tau = .030, .15
     kp, ki, kd = .60, .15, .25
     hover = np.sqrt((mass * gravity / 4.) / kt) / rpm_max
-    rows = []
+    rows, coefficients, matrices = [], [], []
     for factor in (.85, 1., 1.2, 1.6):
         command = hover / np.sqrt(factor)
         plant_gain = 8 * kt * rpm_max ** 2 * command * factor / mass
@@ -123,12 +123,32 @@ def linearized(args):
         characteristic = np.array([deriv_tau * motor_tau, deriv_tau + motor_tau,
                                    1., 0., 0., 0.])
         characteristic[-3:] += numerator
+        normalized = characteristic / characteristic[0]
+        companion = np.zeros((5, 5)); companion[:-1, 1:] = np.eye(4)
+        companion[-1, :] = -normalized[:0:-1]
+        coefficients.append({"ge_factor":factor, **{f"s_power_{5-i}":float(v) for i,v in enumerate(characteristic)}})
+        for i in range(5):
+            for j in range(5): matrices.append({"ge_factor":factor,"row":i,"column":j,"A":companion[i,j]})
         for pole in np.roots(characteristic):
             rows.append({"ge_factor": factor, "hover_command": command,
                          "small_signal_accel_per_command": plant_gain,
                          "pole_real": pole.real, "pole_imag": pole.imag,
                          "stable": bool(pole.real < 0)})
     pd.DataFrame(rows).to_csv(args.out_dir / "linearized_closed_loop_poles.csv", index=False)
+    pd.DataFrame(coefficients).to_csv(args.out_dir / "characteristic_polynomials.csv", index=False)
+    pd.DataFrame(matrices).to_csv(args.out_dir / "companion_state_matrices.csv", index=False)
+    (args.out_dir / "MODEL_SCOPE.md").write_text(
+        "# Local vertical-axis model\n\n"
+        "Operating point: level hover, zero vertical velocity, unsaturated actuators, "
+        "constant GE factor. Motor dynamics are `tau_m r_dot + r = u`; vertical "
+        "dynamics are `z_ddot = K_m r`; the altitude PID is "
+        "`u = (Kp + Ki/s + Kd*s/(1+tau_d*s)) (z_ref-z)`. "
+        "Parameters: mass=1.50 kg, gravity=9.81 m/s^2, KT=1.472e-7, "
+        "rpm_max=9000, tau_m=0.030 s, Kp=0.60, Ki=0.15, Kd=0.25, "
+        "tau_d=0.15 s. The CSV companion matrices reproduce every reported pole. "
+        "This is local evidence only and excludes switching, clamps, mixer saturation, "
+        "attitude estimation, terrain motion, and learned-model feedback; it does not "
+        "prove nonlinear closed-loop stability.\n")
 
 
 def main():

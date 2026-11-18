@@ -66,7 +66,10 @@ def run_records(cfg, out, specs, workers=1):
         write_json(out / "failures.json", failures)
         raise RuntimeError(f"{len(failures)} simulation runs failed; see {out/'failures.json'}")
     metrics = pd.DataFrame(records)
-    paired_statistics(metrics, cfg).to_csv(out / "paired_statistics.csv", index=False)
+    comparison = metrics.copy()
+    if "oracle_aggregation" in comparison and comparison.oracle_aggregation.nunique() > 1:
+        comparison["mode"] = comparison["mode"] + "_" + comparison["oracle_aggregation"]
+    paired_statistics(comparison, cfg).to_csv(out / "paired_statistics.csv", index=False)
     metrics.groupby("mode").agg({
         "agl_rms_primary": ["mean", "std"], "low_clearance_duration_s": ["mean", "std"],
         "low_clearance_events": ["mean", "std"], "gyro_rms": ["mean", "std"],
@@ -81,12 +84,12 @@ def closed_loop_specs(cfg, validation=False, clamp_delta=None):
     return [{"mode": mode, "seed": seed, "clamp_delta": clamp_delta} for seed in seeds for mode in modes]
 
 
-def clamp_command(cfg, out):
+def clamp_command(cfg, out, workers):
     rows = []
     for delta in cfg["asymmetric_clamp_deltas"]:
         sub = out / f"delta_{delta:g}"; sub.mkdir(parents=True, exist_ok=True)
         metrics = run_records(cfg, sub, [{"mode": "ml_asym_clamp", "seed": seed, "clamp_delta": delta}
-                                         for seed in cfg["controller_validation_seeds"]])
+                                         for seed in cfg["controller_validation_seeds"]], workers=workers)
         rows.append({"delta": delta,
                      "agl_rms_primary": metrics.agl_rms_primary.mean(),
                      "low_clearance_duration_s": metrics.low_clearance_duration_s.mean()})
@@ -99,10 +102,10 @@ def clamp_command(cfg, out):
     print(f"[experiment] selected asymmetric clamp delta={selected:g}")
 
 
-def bias_command(cfg, out):
+def bias_command(cfg, out, workers):
     specs = [{"mode": "oracle", "seed": seed, "oracle_bias": bias}
              for seed in cfg["controller_test_seeds"] for bias in cfg["oracle_biases"]]
-    metrics = run_records(cfg, out, specs)
+    metrics = run_records(cfg, out, specs, workers=workers)
     bias_modes = metrics.copy()
     bias_modes["mode"] = bias_modes["oracle_bias"].map(lambda value: f"bias_{value:+.2f}")
     paired_statistics(bias_modes, cfg).to_csv(out / "bias_paired_statistics.csv", index=False)
@@ -121,12 +124,12 @@ def bias_command(cfg, out):
     pd.DataFrame(pairs).to_csv(out / "symmetric_bias_pairs.csv", index=False)
 
 
-def pulse_command(cfg, out):
+def pulse_command(cfg, out, workers):
     pulse = cfg["oracle_pulse"]
     specs = [{"mode": "oracle", "seed": seed, "oracle_bias": bias,
               "pulse_start": pulse["start_s"], "pulse_duration": pulse["duration_s"]}
              for seed in cfg["controller_test_seeds"] for bias in pulse["biases"]]
-    run_records(cfg, out, specs)
+    run_records(cfg, out, specs, workers=workers)
 
 
 def robustness_command(cfg, out, clamp_delta, workers):
@@ -144,9 +147,30 @@ def robustness_command(cfg, out, clamp_delta, workers):
         "minimum_clearance_m": ["mean", "std"]}).to_csv(out / "robustness_summary.csv")
 
 
+def bandwidth_command(cfg, out, workers):
+    modes = ["none", "analytical", "oracle", "ml"]
+    specs = [{"mode": mode, "seed": seed, "altitude_gain_scale": scale}
+             for scale in cfg["feedback_bandwidth_gain_scales"]
+             for seed in cfg["controller_test_seeds"] for mode in modes]
+    metrics = run_records(cfg, out, specs, workers=workers)
+    metrics.groupby(["altitude_gain_scale", "mode"]).agg({
+        "agl_rms_primary": ["mean", "std"], "minimum_clearance_m": ["mean", "std"],
+        "p05_clearance_m": ["mean", "std"]}).to_csv(out / "bandwidth_summary.csv")
+
+
+def oracle_aggregation_command(cfg, out, workers):
+    specs = [{"mode":"oracle", "seed":seed, "oracle_aggregation":aggregation}
+             for seed in cfg["controller_test_seeds"]
+             for aggregation in ("arithmetic", "thrust-weighted")]
+    metrics = run_records(cfg, out, specs, workers=workers)
+    metrics.groupby("oracle_aggregation").agg({
+        "agl_rms_primary":["mean","std"], "minimum_clearance_m":["mean","std"],
+        "p05_clearance_m":["mean","std"]}).to_csv(out/"oracle_aggregation_summary.csv")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "robustness"])
+    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "robustness", "bandwidth", "oracle-aggregation"])
     ap.add_argument("--config", default="experiments/configs/ijira_validity.json")
     ap.add_argument("--out-root", default="experiments/results/ijira_validity")
     ap.add_argument("--run-id")
@@ -163,14 +187,16 @@ def main():
         cmd = [sys.executable, str(ROOT / "experiments/offline_seedwise.py"), "--config", str(ROOT / args.config),
                "--out-dir", str(out), "--epochs", str(args.offline_epochs), "--models", args.offline_models]
         subprocess.run(cmd, cwd=ROOT, check=True)
-    elif args.command == "clamp-validation": clamp_command(cfg, out)
+    elif args.command == "clamp-validation": clamp_command(cfg, out, args.workers)
     elif args.command == "closed-loop":
-        run_records(cfg, out, closed_loop_specs(cfg, clamp_delta=args.clamp_delta))
-    elif args.command == "bias": bias_command(cfg, out)
-    elif args.command == "pulse": pulse_command(cfg, out)
+        run_records(cfg, out, closed_loop_specs(cfg, clamp_delta=args.clamp_delta), workers=args.workers)
+    elif args.command == "bias": bias_command(cfg, out, args.workers)
+    elif args.command == "pulse": pulse_command(cfg, out, args.workers)
     elif args.command == "robustness":
         if args.clamp_delta is None: ap.error("robustness requires frozen --clamp-delta")
         robustness_command(cfg, out, args.clamp_delta, args.workers)
+    elif args.command == "bandwidth": bandwidth_command(cfg, out, args.workers)
+    elif args.command == "oracle-aggregation": oracle_aggregation_command(cfg, out, args.workers)
     print(f"[experiment] outputs: {out}")
 
 

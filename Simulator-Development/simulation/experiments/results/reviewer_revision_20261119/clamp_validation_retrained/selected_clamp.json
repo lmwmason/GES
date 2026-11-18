@@ -1,0 +1,4 @@
+{
+  "delta": 0.0,
+  "selection_rule": "minimum mean validation AGL RMS; tie-break violation duration then tighter cap"
+}

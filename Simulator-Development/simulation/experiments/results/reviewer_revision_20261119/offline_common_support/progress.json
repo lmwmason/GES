@@ -1,0 +1,14 @@
+{
+  "completed_models": [
+    "Analytical",
+    "Predictive analytical",
+    "linear",
+    "tree",
+    "rf",
+    "gb",
+    "MLP",
+    "Rangefinder-only MLP",
+    "LSTM",
+    "TRANSFORMER"
+  ]
+}

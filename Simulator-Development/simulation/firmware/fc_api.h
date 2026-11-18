@@ -38,6 +38,7 @@ void fc_get_debug(fc_debug_t *out);
  * and is unavailable on real hardware. The simulator calls this immediately
  * before fc_step() when an oracle experiment is requested. */
 void fc_set_diagnostic_ge_truth(double factor, double signed_bias);
+void fc_set_diagnostic_prediction_bias(double signed_bias);
 
 #ifdef __cplusplus
 }

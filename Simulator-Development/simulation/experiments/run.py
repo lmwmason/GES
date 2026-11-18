@@ -71,6 +71,10 @@ def run_records(cfg, out, specs, workers=1):
         comparison["mode"] = comparison["mode"] + "_" + comparison["oracle_aggregation"]
     if "oracle_horizon" in comparison and comparison.oracle_horizon.nunique() > 1:
         comparison["mode"] = comparison["mode"] + "_h" + comparison["oracle_horizon"].map(lambda x:f"{x:.3f}")
+    if "prediction_bias" in comparison and comparison.prediction_bias.nunique() > 1:
+        comparison["mode"] = comparison["mode"] + "_pb" + comparison["prediction_bias"].map(lambda x:f"{x:+.3f}")
+    if "pulse_duration" in comparison and comparison.pulse_duration.nunique() > 1:
+        comparison["mode"] = comparison["mode"] + "_d" + comparison["pulse_duration"].map(lambda x:f"{x:.4f}")
     paired_statistics(comparison, cfg).to_csv(out / "paired_statistics.csv", index=False)
     metrics.groupby("mode").agg({
         "agl_rms_primary": ["mean", "std"], "low_clearance_duration_s": ["mean", "std"],
@@ -134,6 +138,15 @@ def pulse_command(cfg, out, workers):
     run_records(cfg, out, specs, workers=workers)
 
 
+def ml_pulse_command(cfg,out,workers):
+    pulse=cfg["ml_pulse_grid"]
+    specs=[{"mode":"ml","seed":seed,"prediction_bias":bias,
+            "pulse_start":pulse["start_s"],"pulse_duration":duration}
+           for seed in cfg["controller_test_seeds"] for duration in pulse["durations_s"]
+           for bias in pulse["biases"]]
+    run_records(cfg,out,specs,workers=workers)
+
+
 def robustness_command(cfg, out, clamp_delta, workers):
     specs = []
     for slope in cfg["robustness"]["slope_exponents"]:
@@ -183,7 +196,8 @@ def oracle_timing_command(cfg, out, workers):
 
 
 def base_model_command(cfg, out, workers):
-    specs = [{"mode":mode,"seed":seed,"ge_base_model":base}
+    specs = [{"mode":mode,"seed":seed,"ge_base_model":base,
+              "clamp_delta":0.0 if mode == "ml_asym_clamp" else None}
              for base in ("cheeseman","hayden")
              for seed in cfg["controller_test_seeds"]
              for mode in cfg["controller_modes"] + ["ml_asym_clamp"]]
@@ -196,7 +210,7 @@ def base_model_command(cfg, out, workers):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "robustness", "bandwidth", "oracle-aggregation", "oracle-timing", "base-model"])
+    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "ml-pulse", "robustness", "bandwidth", "oracle-aggregation", "oracle-timing", "base-model"])
     ap.add_argument("--config", default="experiments/configs/ijira_validity.json")
     ap.add_argument("--out-root", default="experiments/results/ijira_validity")
     ap.add_argument("--run-id")
@@ -218,6 +232,7 @@ def main():
         run_records(cfg, out, closed_loop_specs(cfg, clamp_delta=args.clamp_delta), workers=args.workers)
     elif args.command == "bias": bias_command(cfg, out, args.workers)
     elif args.command == "pulse": pulse_command(cfg, out, args.workers)
+    elif args.command == "ml-pulse": ml_pulse_command(cfg,out,args.workers)
     elif args.command == "robustness":
         if args.clamp_delta is None: ap.error("robustness requires frozen --clamp-delta")
         robustness_command(cfg, out, args.clamp_delta, args.workers)

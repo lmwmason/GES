@@ -33,10 +33,15 @@ typedef struct {
 static fc_state_t g;
 static double g_diag_oracle_truth = NAN;
 static double g_diag_oracle_bias = 0.0;
+static double g_diag_prediction_bias = 0.0;
 
 void fc_set_diagnostic_ge_truth(double factor, double signed_bias) {
     g_diag_oracle_truth = factor;
     g_diag_oracle_bias = signed_bias;
+}
+
+void fc_set_diagnostic_prediction_bias(double signed_bias) {
+    g_diag_prediction_bias = signed_bias;
 }
 
 void fc_init(void) {
@@ -106,6 +111,8 @@ void fc_step(const sensor_packet_t *in, actuator_packet_t *out) {
         g.dbg.thrust_cmd_norm,
     };
     double ai_pred = ge_ff_ml_predict(ml_features);
+    if (isfinite(ai_pred) && g_diag_prediction_bias != 0.0)
+        ai_pred = clampd(ai_pred + g_diag_prediction_bias, 0.85, 1.6);
     double ge_factor = 1.0;
     ge_ff_source_t src;
     int factor_clamped = 0;

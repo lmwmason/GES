@@ -126,6 +126,22 @@ class ResultTests(unittest.TestCase):
             self.assertTrue(((frame.loc[active, "t"] >= .2) & (frame.loc[active, "t"] < .32)).all())
             self.assertTrue(frame.ge_ff_ai.notna().all())
 
+    def test_ml_prediction_bias_pulse_reaches_active_controller(self):
+        simulator = ROOT / "build/bin/simulator"
+        if not simulator.exists(): self.skipTest("build simulator first")
+        with tempfile.TemporaryDirectory() as td:
+            frames=[]
+            for bias in (0., .02):
+                csv=Path(td)/f"ml_{bias}.csv"; env=dict(__import__("os").environ,GE_FF_MODE="ml")
+                subprocess.run([simulator,"--fc",ROOT/"build/bin/libfc.so","--seed","331",
+                    "--duration",".5","--fast","--no-telemetry","--csv",csv,
+                    "--prediction-bias",str(bias),"--oracle-pulse-start",".2",
+                    "--oracle-pulse-duration",".1"],cwd=ROOT,env=env,check=True,capture_output=True)
+                frames.append(read_telemetry(csv))
+            active=(frames[0].t>=.2)&(frames[0].t<.3)
+            delta=(frames[1].loc[active,"ge_ff_ai"].to_numpy()-frames[0].loc[active,"ge_ff_ai"].to_numpy())
+            self.assertGreater(delta.mean(),.015)
+
 
 if __name__ == "__main__":
     unittest.main()

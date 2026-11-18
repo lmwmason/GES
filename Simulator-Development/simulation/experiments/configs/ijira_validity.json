@@ -12,6 +12,7 @@
   "controller_modes": ["none", "analytical", "oracle", "ml_direct", "ml"],
   "oracle_biases": [-0.02, -0.01, 0.0, 0.01, 0.02],
   "oracle_pulse": {"start_s": 30.0, "duration_s": 0.25, "biases": [-0.02, 0.0, 0.02]},
+  "ml_pulse_grid": {"start_s": 30.0, "durations_s": [0.0166667, 0.1, 0.25], "biases": [-0.02, -0.01, 0.0, 0.01, 0.02]},
   "asymmetric_clamp_deltas": [0.0, 0.005, 0.01, 0.02, 0.04],
   "feedback_bandwidth_gain_scales": [1.0, 0.5, 0.25],
   "robustness": {

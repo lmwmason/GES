@@ -25,6 +25,7 @@ typedef void (*fc_init_fn)(void);
 typedef void (*fc_step_fn)(const sensor_packet_t *, actuator_packet_t *);
 typedef void (*fc_get_debug_fn)(fc_debug_t *);
 typedef void (*fc_set_diagnostic_ge_truth_fn)(double, double);
+typedef void (*fc_set_diagnostic_prediction_bias_fn)(double);
 
 typedef struct {
     const double *rpm; /* [4], held fixed across one physics step's RK4 stages */
@@ -150,6 +151,7 @@ static void print_usage(const char *prog) {
         "          [--oracle-bias X] [--oracle-pulse-start SEC] [--oracle-pulse-duration SEC]\n"
         "          [--oracle-aggregation arithmetic|thrust-weighted]\n"
         "          [--oracle-horizon SEC]\n"
+        "          [--prediction-bias X]\n"
         "          [--ge-slope-exponent X] [--ge-curvature-gain X]\n"
         "          [--ge-base-model cheeseman|hayden]\n"
         "  --fc PATH        path to the firmware shared object (default: auto-detected next to this binary)\n"
@@ -181,6 +183,7 @@ int main(int argc, char **argv) {
     double oracle_pulse_duration = 0.0;
     const char *oracle_aggregation = "arithmetic";
     double oracle_horizon = 0.0;
+    double prediction_bias = 0.0;
     double ge_slope_exponent = 1.0;
     double ge_curvature_gain = 0.6;
     ge_base_model_t ge_base_model = GE_BASE_CHEESEMAN;
@@ -199,6 +202,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--oracle-pulse-duration") && i + 1 < argc) oracle_pulse_duration = atof(argv[++i]);
         else if (!strcmp(argv[i], "--oracle-aggregation") && i + 1 < argc) oracle_aggregation = argv[++i];
         else if (!strcmp(argv[i], "--oracle-horizon") && i + 1 < argc) oracle_horizon = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--prediction-bias") && i + 1 < argc) prediction_bias = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-slope-exponent") && i + 1 < argc) ge_slope_exponent = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-curvature-gain") && i + 1 < argc) ge_curvature_gain = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-base-model") && i + 1 < argc) {
@@ -236,7 +240,9 @@ int main(int argc, char **argv) {
     fc_get_debug_fn fc_get_debug_p = (fc_get_debug_fn)dlsym(handle, "fc_get_debug");
     fc_set_diagnostic_ge_truth_fn fc_set_oracle_p =
         (fc_set_diagnostic_ge_truth_fn)dlsym(handle, "fc_set_diagnostic_ge_truth");
-    if (!fc_init_p || !fc_step_p || !fc_get_debug_p || !fc_set_oracle_p) {
+    fc_set_diagnostic_prediction_bias_fn fc_set_prediction_bias_p =
+        (fc_set_diagnostic_prediction_bias_fn)dlsym(handle, "fc_set_diagnostic_prediction_bias");
+    if (!fc_init_p || !fc_step_p || !fc_get_debug_p || !fc_set_oracle_p || !fc_set_prediction_bias_p) {
         fprintf(stderr, "[sim] dlsym failed: %s\n", dlerror());
         return 1;
     }
@@ -315,10 +321,14 @@ int main(int argc, char **argv) {
             if (denominator > 1e-12) oracle_mean = numerator / denominator;
         }
         double active_oracle_bias = oracle_bias;
+        double active_prediction_bias = prediction_bias;
         if (oracle_pulse_start >= 0.0 &&
-            !(t >= oracle_pulse_start && t < oracle_pulse_start + oracle_pulse_duration))
+            !(t >= oracle_pulse_start && t < oracle_pulse_start + oracle_pulse_duration)) {
             active_oracle_bias = 0.0;
+            active_prediction_bias = 0.0;
+        }
         fc_set_oracle_p(oracle_mean, active_oracle_bias);
+        fc_set_prediction_bias_p(active_prediction_bias);
         actuator_packet_t ap;
         fc_step_p(&sp, &ap);
 

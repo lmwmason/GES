@@ -1,0 +1,8 @@
+{
+  "completed_models": [
+    "Analytical",
+    "rf",
+    "MLP",
+    "LSTM"
+  ]
+}

@@ -13,7 +13,15 @@ def main():
     d=pd.read_csv(a.root/"oracle_timing_30seed/per_seed_metrics.csv")
     s=d.groupby(["oracle_horizon","oracle_aggregation"]).agl_rms_primary.agg(["mean","sem"]).reset_index()
     fig,ax=plt.subplots()
-    for name,g in s.groupby("oracle_aggregation"): ax.errorbar(g.oracle_horizon*1000,g["mean"],yerr=1.96*g.sem,marker="o",capsize=3,label=name)
+    for name,g in s.groupby("oracle_aggregation"):
+        ax.errorbar(
+            g["oracle_horizon"] * 1000,
+            g["mean"],
+            yerr=1.96 * g["sem"],
+            marker="o",
+            capsize=3,
+            label=name,
+        )
     ax.set(xlabel="Oracle preview horizon (ms)",ylabel="AGL RMS (m)"); ax.legend(); save(fig,a.out_dir/"oracle_timing.png")
 
     d=pd.read_csv(a.root/"base_model_30seed_v2/per_seed_metrics.csv")

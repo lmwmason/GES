@@ -58,17 +58,30 @@ Additional reviewer diagnostics:
 
 ```bash
 python experiments/run.py oracle-timing --run-id oracle_timing_30seed --workers 20
-python experiments/run.py base-model --run-id base_model_30seed --workers 30
+python experiments/run.py base-model --run-id base_model_30seed_v2 --workers 30
 python experiments/run.py ml-pulse --run-id ml_active_pulse_grid --workers 30
 python experiments/ml_pulse_analysis.py \
   --run-dir experiments/results/ijira_validity/ml_active_pulse_grid \
   --out-dir experiments/results/ijira_validity/ml_active_pulse_analysis
 python experiments/loop_closure.py frequency \
-  --out-dir experiments/results/ijira_validity/frequency_stability
+  --out-dir experiments/results/ijira_validity/frequency_stability_v2
 python experiments/terrain_decomposition.py \
   --dataset dataset/reviewer_corrected_20261119/dataset_all.csv \
   --offline-dir experiments/results/reviewer_revision_20261119/offline_common_support \
   --out-dir experiments/results/ijira_validity/terrain_decomposition
+for horizon in 0 0.05 0.10 0.20; do
+  python experiments/offline_seedwise.py \
+    --config experiments/configs/ijira_validity.json \
+    --dataset dataset/reviewer_corrected_20261119/dataset_all.csv \
+    --out-dir "experiments/results/ijira_validity/horizon_${horizon}s" \
+    --models rf mlp lstm --lead-s "$horizon" --epochs 25
+done
+python experiments/horizon_summary.py \
+  --root experiments/results/ijira_validity \
+  --out-dir experiments/results/ijira_validity/horizon_summary
+python experiments/completion_report.py \
+  --root experiments/results/ijira_validity \
+  --out-dir experiments/results/ijira_validity/publication_figures
 ```
 
 `oracle-timing` compares current-factor cancellation with a diagnostic 100 ms

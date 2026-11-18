@@ -124,20 +124,23 @@ def compute_metrics(df: pd.DataFrame, cfg: dict) -> dict:
 def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict,
                    oracle_bias=0.0, slope_exponent=1.0, curvature_gain=0.6,
                    clamp_delta=None, pulse_start=None, pulse_duration=None,
-                   altitude_gain_scale=1.0, oracle_aggregation="arithmetic") -> dict:
+                   altitude_gain_scale=1.0, oracle_aggregation="arithmetic",
+                   oracle_horizon=0.0, ge_base_model="cheeseman") -> dict:
     raw_dir = out_dir / "raw"
     log_dir = out_dir / "logs"
     raw_dir.mkdir(parents=True, exist_ok=True); log_dir.mkdir(parents=True, exist_ok=True)
     pulse_tag = "" if pulse_start is None else f"_p{pulse_start:.2f}x{pulse_duration:.2f}"
     aggregation_tag = "_ow" if oracle_aggregation == "thrust-weighted" else ""
-    tag = f"seed{seed}_{mode}{aggregation_tag}_b{oracle_bias:+.3f}_s{slope_exponent:.2f}_c{curvature_gain:.2f}{pulse_tag}"
+    horizon_tag = f"_h{oracle_horizon:.3f}_{ge_base_model}"
+    tag = f"seed{seed}_{mode}{aggregation_tag}{horizon_tag}_b{oracle_bias:+.3f}_s{slope_exponent:.2f}_c{curvature_gain:.2f}{pulse_tag}"
     tmp_csv = raw_dir / f"{tag}.csv"
     gz_csv = raw_dir / f"{tag}.csv.gz"
     cmd = [str(root / "build/bin/simulator"), "--fc", str(root / "build/bin/libfc.so"),
            "--seed", str(seed), "--duration", str(cfg["duration_s"]), "--fast", "--no-telemetry",
            "--csv", str(tmp_csv), "--oracle-bias", str(oracle_bias),
            "--ge-slope-exponent", str(slope_exponent), "--ge-curvature-gain", str(curvature_gain)]
-    cmd += ["--oracle-aggregation", oracle_aggregation]
+    cmd += ["--oracle-aggregation", oracle_aggregation, "--oracle-horizon", str(oracle_horizon)]
+    cmd += ["--ge-base-model", ge_base_model]
     if pulse_start is not None:
         cmd += ["--oracle-pulse-start", str(pulse_start),
                 "--oracle-pulse-duration", str(pulse_duration)]
@@ -152,6 +155,8 @@ def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict
               "curvature_gain": curvature_gain, "clamp_delta": clamp_delta,
               "altitude_gain_scale": altitude_gain_scale,
               "oracle_aggregation": oracle_aggregation,
+              "oracle_horizon": oracle_horizon,
+              "ge_base_model": ge_base_model,
               "pulse_start": pulse_start, "pulse_duration": pulse_duration,
               "returncode": proc.returncode, "status": "failed" if proc.returncode else "complete"}
     if proc.returncode:
@@ -174,7 +179,7 @@ def paired_statistics(metrics: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     rows = []
     rng = np.random.default_rng(cfg["bootstrap"]["seed"])
     n_boot = int(cfg["bootstrap"]["resamples"])
-    design_columns = [name for name in ("slope_exponent", "curvature_gain", "altitude_gain_scale")
+    design_columns = [name for name in ("slope_exponent", "curvature_gain", "altitude_gain_scale", "ge_base_model")
                       if name in metrics and metrics[name].nunique(dropna=False) > 1]
     grouped = metrics.groupby(design_columns, dropna=False) if design_columns else [((), metrics)]
     for design_values, group in grouped:

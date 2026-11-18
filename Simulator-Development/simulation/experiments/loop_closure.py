@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy import stats
+import matplotlib.pyplot as plt
 
 
 def mean_test(values):
@@ -151,6 +152,60 @@ def linearized(args):
         "prove nonlinear closed-loop stability.\n")
 
 
+def frequency(args):
+    """Exact-frequency local loop with transport delay; no Padé approximation."""
+    mass, gravity, kt, rpm_max = 1.50, 9.81, 1.472e-7, 9000.0
+    motor_tau, deriv_tau = .030, .15
+    kp, ki, kd = .60, .15, .25
+    hover = np.sqrt((mass * gravity / 4.) / kt) / rpm_max
+    omega = np.logspace(-3, 3, 12000)
+    rows, responses = [], []
+    for factor in (.85, 1., 1.2, 1.6):
+      command = hover / np.sqrt(factor)
+      plant_gain = 8 * kt * rpm_max ** 2 * command * factor / mass
+      for gain_scale in (1., .5, .25):
+       for delay in (0., .03, .10):
+        s = 1j * omega
+        controller = gain_scale * (kp + ki/s + kd*s/(1 + deriv_tau*s))
+        plant = plant_gain / (s*s*(1 + motor_tau*s))
+        loop = controller * plant * np.exp(-s*delay)
+        magnitude = np.abs(loop)
+        phase = np.unwrap(np.angle(loop))
+        if phase[0] > 0: phase -= 2*np.pi
+        # All negative-real-axis crossings; scaling r changes magnitude only.
+        crossing_gains = []
+        for level in -np.pi * np.arange(1, 21, 2):
+            hit = np.flatnonzero((phase[:-1]-level)*(phase[1:]-level) <= 0)
+            for i in hit:
+                frac = (level-phase[i])/(phase[i+1]-phase[i]) if phase[i+1] != phase[i] else 0
+                logmag = np.log(magnitude[i]) + frac*(np.log(magnitude[i+1])-np.log(magnitude[i]))
+                crossing_gains.append(float(np.exp(-logmag)))
+        gain_hits = np.flatnonzero((magnitude[:-1]-1)*(magnitude[1:]-1) <= 0)
+        phase_margins=[]
+        for i in gain_hits:
+            frac=(1-magnitude[i])/(magnitude[i+1]-magnitude[i]) if magnitude[i+1] != magnitude[i] else 0
+            ph=phase[i]+frac*(phase[i+1]-phase[i]); phase_margins.append(np.degrees(np.pi+ph))
+        minimum_pm=min(phase_margins) if phase_margins else np.nan
+        nominal_stable=bool(np.isfinite(minimum_pm) and minimum_pm > 0)
+        admissible=min((g for g in crossing_gains if g > 1.0),default=np.nan) if nominal_stable else np.nan
+        rows.append({"ge_factor":factor,"altitude_gain_scale":gain_scale,"delay_s":delay,
+                     "plant_gain":plant_gain,"gain_margin_r_upper":admissible,
+                     "minimum_phase_margin_deg":minimum_pm,"nominal_locally_stable":nominal_stable,
+                     "negative_axis_crossings":len(crossing_gains)})
+        if factor == 1. and gain_scale == 1.:
+            responses.extend({"delay_s":delay,"omega_rad_s":w,"magnitude_db":20*np.log10(m),
+                              "phase_deg":np.degrees(p)} for w,m,p in zip(omega,magnitude,phase))
+    pd.DataFrame(rows).to_csv(args.out_dir/"delay_gain_margins.csv",index=False)
+    pd.DataFrame(responses).to_csv(args.out_dir/"default_bode_response.csv",index=False)
+    frame=pd.DataFrame(responses); fig,(ax1,ax2)=plt.subplots(2,1,sharex=True,figsize=(6,5))
+    for delay,g in frame.groupby("delay_s"):
+        ax1.semilogx(g.omega_rad_s,g.magnitude_db,label=f"delay={delay:.2f}s")
+        ax2.semilogx(g.omega_rad_s,g.phase_deg)
+    ax1.axhline(0,color="0.5",lw=.8); ax2.axhline(-180,color="0.5",lw=.8)
+    ax1.set(ylabel="Magnitude (dB)"); ax1.legend(); ax2.set(xlabel="Frequency (rad/s)",ylabel="Phase (deg)")
+    fig.tight_layout(); fig.savefig(args.out_dir/"bode_with_delay.png",dpi=300); plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="command", required=True)
     lag = sub.add_parser("lagged"); lag.add_argument("--run-dir", type=Path, required=True)
@@ -158,10 +213,12 @@ def main():
     pul = sub.add_parser("pulse"); pul.add_argument("--run-dir", type=Path, required=True)
     pul.add_argument("--out-dir", type=Path, required=True)
     lin = sub.add_parser("linearized"); lin.add_argument("--out-dir", type=Path, required=True)
+    freq = sub.add_parser("frequency"); freq.add_argument("--out-dir", type=Path, required=True)
     args = ap.parse_args(); args.out_dir.mkdir(parents=True, exist_ok=True)
     if args.command == "lagged": lagged(args)
     elif args.command == "pulse": pulse(args)
-    else: linearized(args)
+    elif args.command == "linearized": linearized(args)
+    else: frequency(args)
 
 
 if __name__ == "__main__": main()

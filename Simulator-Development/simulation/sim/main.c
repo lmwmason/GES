@@ -149,7 +149,9 @@ static void print_usage(const char *prog) {
         "          [--seed N] [--fast] [--no-telemetry] [--csv PATH]\n"
         "          [--oracle-bias X] [--oracle-pulse-start SEC] [--oracle-pulse-duration SEC]\n"
         "          [--oracle-aggregation arithmetic|thrust-weighted]\n"
+        "          [--oracle-horizon SEC]\n"
         "          [--ge-slope-exponent X] [--ge-curvature-gain X]\n"
+        "          [--ge-base-model cheeseman|hayden]\n"
         "  --fc PATH        path to the firmware shared object (default: auto-detected next to this binary)\n"
         "  --seed N         terrain seed (default 1); different seeds -> different irregular terrain\n"
         "  --fast           skip real-time pacing, run as fast as the CPU allows (for dataset generation)\n"
@@ -159,6 +161,7 @@ static void print_usage(const char *prog) {
         "  --oracle-pulse-start SEC  apply oracle bias only after this time\n"
         "  --oracle-pulse-duration SEC  pulse width; requires pulse start\n"
         "  --oracle-aggregation MODE  collective truth reduction (default arithmetic)\n"
+        "  --oracle-horizon SEC  kinematic terrain-preview horizon (diagnostic only)\n"
         "  --ge-slope-exponent X  heuristic slope exponent (default 1.0)\n"
         "  --ge-curvature-gain X  heuristic curvature gain (default 0.6)\n",
         prog);
@@ -177,8 +180,10 @@ int main(int argc, char **argv) {
     double oracle_pulse_start = -1.0;
     double oracle_pulse_duration = 0.0;
     const char *oracle_aggregation = "arithmetic";
+    double oracle_horizon = 0.0;
     double ge_slope_exponent = 1.0;
     double ge_curvature_gain = 0.6;
+    ge_base_model_t ge_base_model = GE_BASE_CHEESEMAN;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--fc") && i + 1 < argc) fc_path = argv[++i];
@@ -193,8 +198,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--oracle-pulse-start") && i + 1 < argc) oracle_pulse_start = atof(argv[++i]);
         else if (!strcmp(argv[i], "--oracle-pulse-duration") && i + 1 < argc) oracle_pulse_duration = atof(argv[++i]);
         else if (!strcmp(argv[i], "--oracle-aggregation") && i + 1 < argc) oracle_aggregation = argv[++i];
+        else if (!strcmp(argv[i], "--oracle-horizon") && i + 1 < argc) oracle_horizon = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-slope-exponent") && i + 1 < argc) ge_slope_exponent = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-curvature-gain") && i + 1 < argc) ge_curvature_gain = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--ge-base-model") && i + 1 < argc) {
+            const char *model = argv[++i];
+            if (!strcmp(model, "cheeseman")) ge_base_model = GE_BASE_CHEESEMAN;
+            else if (!strcmp(model, "hayden")) ge_base_model = GE_BASE_HAYDEN;
+            else { fprintf(stderr, "[sim] invalid GE base model: %s\n", model); return 1; }
+        }
         else if (!strcmp(argv[i], "--help")) { print_usage(argv[0]); return 0; }
         else { fprintf(stderr, "[sim] unknown argument: %s\n", argv[i]); print_usage(argv[0]); return 1; }
     }
@@ -205,6 +217,10 @@ int main(int argc, char **argv) {
     }
     if (strcmp(oracle_aggregation, "arithmetic") && strcmp(oracle_aggregation, "thrust-weighted")) {
         fprintf(stderr, "[sim] invalid oracle aggregation: %s\n", oracle_aggregation);
+        return 1;
+    }
+    if (oracle_horizon < 0.0 || oracle_horizon > 0.5) {
+        fprintf(stderr, "[sim] oracle horizon must be in [0, 0.5] s\n");
         return 1;
     }
     if (!fc_path) fc_path = default_fc_path();
@@ -227,7 +243,7 @@ int main(int argc, char **argv) {
     fc_init_p();
 
     terrain_init(seed);
-    ge_configure(ge_slope_exponent, ge_curvature_gain);
+    ge_configure(ge_slope_exponent, ge_curvature_gain, ge_base_model);
     printf("[sim] terrain seed: %u\n", seed);
 
     telemetry_t tm;
@@ -283,7 +299,8 @@ int main(int argc, char **argv) {
         double oracle_truth[4];
         for (int i = 0; i < 4; i++) {
             vec3_t off = {DP_MOTOR_LAYOUT[i].x, DP_MOTOR_LAYOUT[i].y, 0.0};
-            vec3_t rotor_pos = v3_add(rb.pos, q_rotate(rb.quat, off));
+            vec3_t preview_pos = v3_add(rb.pos, v3_scale(rb.vel, oracle_horizon));
+            vec3_t rotor_pos = v3_add(preview_pos, q_rotate(rb.quat, off));
             ge_result_t ge = ge_compute(rotor_pos, DP_ROTOR_RADIUS_M);
             oracle_truth[i] = ge.factor;
         }

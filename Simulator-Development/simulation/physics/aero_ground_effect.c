@@ -4,10 +4,25 @@
 
 static double g_slope_exponent = 1.0;
 static double g_curvature_gain = 0.6;
+static ge_base_model_t g_base_model = GE_BASE_CHEESEMAN;
 
-void ge_configure(double slope_exponent, double curvature_gain) {
+double ge_flat_factor(double z, double rotor_radius_m, ge_base_model_t base_model) {
+    double z_min = rotor_radius_m * 0.50;
+    if (z < z_min) z = z_min;
+    if (base_model == GE_BASE_HAYDEN) {
+        double z_over_d = fmax(z / (2.0 * rotor_radius_m), 0.15);
+        double fg = 1.0 / (0.9926 + 0.03794 / (z_over_d * z_over_d));
+        fg = fmin(fg, 1.0);
+        return pow(fg, -2.0 / 3.0);
+    }
+    double ratio = rotor_radius_m / (4.0 * z);
+    return 1.0 / (1.0 - ratio * ratio);
+}
+
+void ge_configure(double slope_exponent, double curvature_gain, ge_base_model_t base_model) {
     g_slope_exponent = slope_exponent > 0.0 ? slope_exponent : 1.0;
     g_curvature_gain = curvature_gain >= 0.0 ? curvature_gain : 0.6;
+    g_base_model = base_model;
 }
 
 ge_result_t ge_compute(vec3_t rotor_world_pos, double rotor_radius_m) {
@@ -19,9 +34,16 @@ ge_result_t ge_compute(vec3_t rotor_world_pos, double rotor_radius_m) {
     if (z < z_min) z = z_min;
     r.clearance = z;
 
-    /* Cheeseman & Bennett (1955) flat, level-ground IGE thrust ratio. */
-    double ratio = rotor_radius_m / (4.0 * z);
-    double factor_flat = 1.0 / (1.0 - ratio * ratio);
+    double factor_flat;
+    if (g_base_model == GE_BASE_HAYDEN) {
+        /* Hayden empirical induced-power model as documented in NASA NDARC
+         * TP-20220000355, converted to thrust multiplier kappa=f_g^(-2/3).
+         * NDARC restricts the expression to z/D >= 0.15 and f_g <= 1. */
+        factor_flat = ge_flat_factor(z, rotor_radius_m, GE_BASE_HAYDEN);
+    } else {
+        /* Cheeseman & Bennett (1955) flat, level-ground IGE thrust ratio. */
+        factor_flat = ge_flat_factor(z, rotor_radius_m, GE_BASE_CHEESEMAN);
+    }
 
     double dhdx, dhdy;
     terrain_gradient(rotor_world_pos.x, rotor_world_pos.y, &dhdx, &dhdy);

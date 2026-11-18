@@ -65,3 +65,6 @@ add_executable(test_ge_ff
 )
 target_link_libraries(test_ge_ff common m)
 add_test(NAME ge_ff_actuator_mapping COMMAND test_ge_ff)
+add_executable(test_ge_models tests/test_ge_models.c physics/aero_ground_effect.c physics/terrain.c)
+target_link_libraries(test_ge_models common m)
+add_test(NAME ge_base_models COMMAND test_ge_models)

@@ -69,6 +69,8 @@ def run_records(cfg, out, specs, workers=1):
     comparison = metrics.copy()
     if "oracle_aggregation" in comparison and comparison.oracle_aggregation.nunique() > 1:
         comparison["mode"] = comparison["mode"] + "_" + comparison["oracle_aggregation"]
+    if "oracle_horizon" in comparison and comparison.oracle_horizon.nunique() > 1:
+        comparison["mode"] = comparison["mode"] + "_h" + comparison["oracle_horizon"].map(lambda x:f"{x:.3f}")
     paired_statistics(comparison, cfg).to_csv(out / "paired_statistics.csv", index=False)
     metrics.groupby("mode").agg({
         "agl_rms_primary": ["mean", "std"], "low_clearance_duration_s": ["mean", "std"],
@@ -168,9 +170,33 @@ def oracle_aggregation_command(cfg, out, workers):
         "p05_clearance_m":["mean","std"]}).to_csv(out/"oracle_aggregation_summary.csv")
 
 
+def oracle_timing_command(cfg, out, workers):
+    specs = [{"mode":"oracle", "seed":seed, "oracle_horizon":horizon,
+              "oracle_aggregation":aggregation}
+             for seed in cfg["controller_test_seeds"]
+             for horizon in (0.0, 0.1)
+             for aggregation in ("arithmetic", "thrust-weighted")]
+    metrics = run_records(cfg, out, specs, workers=workers)
+    metrics.groupby(["oracle_horizon","oracle_aggregation"]).agg({
+        "agl_rms_primary":["mean","std"], "minimum_clearance_m":["mean","std"],
+        "p05_clearance_m":["mean","std"]}).to_csv(out/"oracle_timing_summary.csv")
+
+
+def base_model_command(cfg, out, workers):
+    specs = [{"mode":mode,"seed":seed,"ge_base_model":base}
+             for base in ("cheeseman","hayden")
+             for seed in cfg["controller_test_seeds"]
+             for mode in cfg["controller_modes"] + ["ml_asym_clamp"]]
+    metrics=run_records(cfg,out,specs,workers=workers)
+    metrics.groupby(["ge_base_model","mode"]).agg({
+        "agl_rms_primary":["mean","std"],"minimum_clearance_m":["mean","std"],
+        "p05_clearance_m":["mean","std"],"low_clearance_duration_s":["mean","std"]
+    }).to_csv(out/"base_model_summary.csv")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "robustness", "bandwidth", "oracle-aggregation"])
+    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "robustness", "bandwidth", "oracle-aggregation", "oracle-timing", "base-model"])
     ap.add_argument("--config", default="experiments/configs/ijira_validity.json")
     ap.add_argument("--out-root", default="experiments/results/ijira_validity")
     ap.add_argument("--run-id")
@@ -197,6 +223,8 @@ def main():
         robustness_command(cfg, out, args.clamp_delta, args.workers)
     elif args.command == "bandwidth": bandwidth_command(cfg, out, args.workers)
     elif args.command == "oracle-aggregation": oracle_aggregation_command(cfg, out, args.workers)
+    elif args.command == "oracle-timing": oracle_timing_command(cfg, out, args.workers)
+    elif args.command == "base-model": base_model_command(cfg, out, args.workers)
     print(f"[experiment] outputs: {out}")
 
 

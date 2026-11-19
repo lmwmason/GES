@@ -65,3 +65,23 @@ measurement is about `width_ns=1000000 period_ns=20000000`.
 If there is no complete pulse within 150 ms, the firmware reports a timeout.
 This measures edge timing at D8 on the same clock as the generator.
 It does not measure signal amplitude or tell whether the ESC has armed.
+
+## XM30FX endpoint calibration
+
+The normal `RUN` cap remains 1500 us. `CAL HIGH` is a separate command
+that can send the full 2000 us signal for at most six seconds. Use it only
+with the propeller removed, motor secured, and ESC battery disconnected at
+the start. Keep the Uno on USB with the red BEC power lead isolated.
+
+1. With ESC power disconnected, send `CAL HIGH`. Connect the ESC battery
+   promptly after the acknowledgement.
+2. When the ESC emits its two high-endpoint confirmation beeps, immediately
+   send `CAL LOW`. It outputs 1000 us for two seconds, then disables output.
+   Listen for the long confirmation beep. If the expected high-endpoint
+   cue does not occur, stop with `!` and disconnect the ESC battery.
+3. Power-cycle the ESC with minimum PWM already present for a normal startup
+   test. Confirm the long ready beep before commanding motor throttle.
+
+If `CAL LOW` is not sent during the high window, the firmware turns D4 off.
+`STOP` and `!` also turn D4 off during calibration.
+[XM30FX manual](https://m.xcopter.com/product/pt/xm30fx/xm30fx.pdf)

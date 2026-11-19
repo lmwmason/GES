@@ -127,6 +127,8 @@ enum Command {
     Tare,
     Status,
     Probe,
+    CalHigh,
+    CalLow,
 }
 
 fn parse(line: &str) -> Option<Command> {
@@ -138,6 +140,11 @@ fn parse(line: &str) -> Option<Command> {
         "TARE" => Command::Tare,
         "STATUS" => Command::Status,
         "PROBE" => Command::Probe,
+        "CAL" => match words.next()? {
+            "HIGH" => Command::CalHigh,
+            "LOW" => Command::CalLow,
+            _ => return None,
+        },
         _ => return None,
     };
     words.next().is_none().then_some(command)
@@ -361,6 +368,8 @@ fn main() -> ! {
                     Esc::Ready(_) => "ready",
                     Esc::Running(_, _) => "running",
                     Esc::Stopping(_) => "stopping",
+                    Esc::CalibrationHigh(_) => "cal_high",
+                    Esc::CalibrationLow(_) => "cal_low",
                 };
                 ufmt::uwriteln!(
                     &mut serial,
@@ -372,10 +381,26 @@ fn main() -> ! {
                 .unwrap_infallible();
             }
             Some(Command::Probe) => with_pwm(|pwm| {
-                if !matches!(pwm.esc, Esc::Running(..)) {
+                if matches!(
+                    pwm.esc,
+                    Esc::Off | Esc::Arming(_) | Esc::Ready(_) | Esc::Stopping(_)
+                ) {
                     pwm.start_capture();
                 }
             }),
+            Some(Command::CalHigh)
+                if fresh && tare_remaining == 0 && with_pwm(|pwm| pwm.esc.begin_calibration()) =>
+            {
+                ufmt::uwriteln!(
+                    &mut serial,
+                    "# CAL HIGH: 2000 us, max 6 s; CAL LOW after confirmation beeps"
+                )
+                .unwrap_infallible();
+            }
+            Some(Command::CalLow) if fresh && with_pwm(|pwm| pwm.esc.calibration_low()) => {
+                ufmt::uwriteln!(&mut serial, "# CAL LOW: 1000 us for 2 s, then output off")
+                    .unwrap_infallible();
+            }
             _ => {
                 ufmt::uwriteln!(
                     &mut serial,

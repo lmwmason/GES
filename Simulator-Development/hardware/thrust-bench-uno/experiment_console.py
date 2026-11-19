@@ -114,8 +114,8 @@ class Uno:
 
 
 def capture_calibration(uno, directory, points, mass_g):
-    if not math.isfinite(mass_g) or mass_g < 0:
-        raise ValueError("Calibration mass must be finite and at least zero.")
+    if not math.isfinite(mass_g):
+        raise ValueError("Calibration mass must be finite. Use a negative value for a reverse load.")
     uno.port.reset_input_buffer()
     uno.require_off()
     samples = []
@@ -249,7 +249,7 @@ def enter_rpm(directory, trials, run_id, rpm):
 
 
 HELP = """cal 0                        Capture unloaded assembled-fixture readings
-cal <grams>                  Capture a known mass along the thrust axis
+cal <signed-grams>           Positive for thrust direction, negative for reverse
 fit                          Compute counts/N from calibration
 arm                          Output minimum PWM only. Wait for the ESC ready tone.
 run <block> <near|far> <height-mm> <target-rpm> <pwm-us>
@@ -324,7 +324,9 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
     start.add_argument("--port", default="/dev/ttyACM0")
-    start.add_argument("--out", type=Path)
+    output = start.add_mutually_exclusive_group()
+    output.add_argument("--out", type=Path)
+    output.add_argument("--resume", type=Path, help="Resume an existing session with the same fixture.")
     start.add_argument("--duration-ms", type=int, default=5000)
     start.add_argument("--settle-ms", type=int, default=2000)
     annotate = commands.add_parser("rpm", help="Record measured RPM after closing the console.")
@@ -335,6 +337,16 @@ def main():
     if args.command == "rpm":
         trials = load_json(args.session / "trials.json", [])
         print(f"{enter_rpm(args.session, trials, args.run_id, args.actual_rpm)} rows in measurements.csv")
+        return
+    if args.resume is not None:
+        session = load_json(args.resume / "session.json", None)
+        if session is None:
+            parser.error("resume requires an existing session directory")
+        args.out = args.resume
+        args.port = session["port"]
+        args.duration_ms = session["duration_ms"]
+        args.settle_ms = session["settle_ms"]
+        console(args)
         return
     if not 1000 <= args.duration_ms <= 10000 or not 0 <= args.settle_ms <= args.duration_ms - 700:
         parser.error("duration 1000–10000 ms, with at least 700 ms after settling")

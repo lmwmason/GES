@@ -4,7 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from experiment_console import GRAVITY, enter_rpm, fit_calibration, run_trial, to_newtons, trial_specs
+from experiment_console import (
+    GRAVITY, capture_calibration, enter_rpm, fit_calibration, run_trial, to_newtons, trial_specs,
+)
 
 
 class ExperimentConsoleTests(unittest.TestCase):
@@ -16,6 +18,16 @@ class ExperimentConsoleTests(unittest.TestCase):
         ])
         self.assertAlmostEqual(to_newtons(2000, calibration), 0)
         self.assertAlmostEqual(to_newtons(1700, calibration), 0.3 * GRAVITY)
+
+    def test_reverse_calibration_load_keeps_thrust_positive(self):
+        uno = Mock()
+        uno.read.side_effect = [f"{t},0,1940,0" for t in range(0, 2001, 100)]
+        points = [{"mass_g": 0, "mean_counts": 2000}]
+        with tempfile.TemporaryDirectory() as path:
+            capture_calibration(uno, Path(path), points, -30)
+        calibration = fit_calibration(points)
+        self.assertAlmostEqual(to_newtons(1940, calibration), -0.03 * GRAVITY)
+        self.assertAlmostEqual(to_newtons(2060, calibration), 0.03 * GRAVITY)
 
     def test_run_requires_ready_state(self):
         uno = Mock()

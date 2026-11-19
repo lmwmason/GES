@@ -39,12 +39,15 @@ uv run --no-project --with pyserial python experiment_console.py start
 1. Disconnect the ESC battery and leave the Uno on USB. Keep the load cell
    in its assembled test fixture. With no calibration mass attached and the
    fixture at rest, enter `cal 0` to record its baseline.
-2. Apply independently weighed masses one at a time through the same load
-   path and in the same force direction as thrust. Enter the actual mass in
-   grams, for example `cal 200` and `cal 400` for 200 g and 400 g. Keep each
-   mass still until its two-second capture ends. Use loads spanning the
-   expected force range within the fixture and load-cell ratings. Include
-   the mass of any hanger added after the baseline.
+2. Apply independently weighed masses one at a time through the thrust load
+   path. Enter positive grams in the thrust direction and negative grams
+   for a reverse load along the same axis. For example, enter `cal -30` for
+   30 g in the reverse direction. Keep each mass still through the two-second
+   capture. Include the mass of any hanger added after the baseline. A
+   single reverse load gives a local slope and assumes the fixture responds
+   linearly through zero. For quantitative thrust data, verify the slope
+   with thrust-direction loads spanning the test force range within the
+   fixture and load-cell ratings.
 3. Remove the weights, repeat `cal 0` to check zero return, then enter `fit`.
    The console saves the signed counts-per-newton slope, the zero offset and
    the largest fit residual in newtons. Compare the two unloaded readings
@@ -68,6 +71,8 @@ The console shows live force and the run ID. It writes session settings,
 calibration samples and fit, raw run CSVs, and run summaries to
 `runs/<UTC-timestamp>/`. Complete runs with measured RPM are also exported
 to `measurements.csv`. RPM can be entered after closing the serial console.
+Use `start --resume runs/<UTC-timestamp>` to reopen a session. Check the
+unloaded reading again before relying on an earlier calibration.
 
 ```sh
 python3 experiment_console.py rpm runs/<UTC-timestamp> run_001 <actual-rpm>

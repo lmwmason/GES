@@ -1,0 +1,21 @@
+[package]
+name = "sharp-delay-uno"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "sharp-delay-uno"
+test = false
+bench = false
+
+[dependencies]
+arduino-hal = { git = "https://github.com/Rahix/avr-hal", rev = "0bbec46f7cfee8542f89f0257619d76cddbf835b", features = ["arduino-uno"] }
+nb = "1.1.0"
+panic-halt = "1.0.0"
+ufmt = "0.2.0"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"

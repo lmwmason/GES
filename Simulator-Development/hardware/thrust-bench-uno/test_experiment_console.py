@@ -5,7 +5,8 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from experiment_console import (
-    GRAVITY, capture_calibration, enter_rpm, fit_calibration, run_trial, to_newtons, trial_specs,
+    GRAVITY, capture_calibration, compare_pair, enter_rpm, fit_calibration, run_trial, to_newtons,
+    trial_specs, video_rpm,
 )
 
 
@@ -71,3 +72,25 @@ class ExperimentConsoleTests(unittest.TestCase):
                 run_trial(uno, Path(path), trials, specs, {"zero_counts": 100, "counts_per_n": 50})
         self.assertEqual(trials[0]["status"], "incomplete")
         uno.stop.assert_called_once()
+
+    def test_video_rpm_uses_capture_rate_and_elapsed_frames(self):
+        self.assertAlmostEqual(video_rpm(1000, 120, 360, 40), 10000)
+        with self.assertRaisesRegex(ValueError, "four captured"):
+            video_rpm(1000, 120, 240, 40)
+        with self.assertRaisesRegex(ValueError, "increasing"):
+            video_rpm(1000, 120, 119, 1)
+
+    def test_pair_checks_measured_speeds_and_propeller(self):
+        far = {"run_id": "run_001", "status": "complete", "condition": "far",
+               "height_m": 0.5, "rpm": 10000, "thrust_N": 2, "propeller": "1045"}
+        near = {**far, "run_id": "run_002", "condition": "near",
+                "height_m": 0.05, "rpm": 10040, "thrust_N": 2.1}
+        matched = compare_pair([far, near], "run_001", "run_002", 0.005)
+        self.assertAlmostEqual(matched["near_to_far_thrust_ratio"], 1.05)
+        near["rpm"] = 10100
+        unmatched = compare_pair([far, near], "run_001", "run_002", 0.005)
+        self.assertFalse(unmatched["matched"])
+        self.assertNotIn("near_to_far_thrust_ratio", unmatched)
+        near["propeller"] = "8040"
+        with self.assertRaisesRegex(ValueError, "propeller"):
+            compare_pair([far, near], "run_001", "run_002", 0.005)

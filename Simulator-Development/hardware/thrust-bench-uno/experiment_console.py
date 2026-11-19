@@ -257,13 +257,57 @@ def export_measurements(directory, trials):
     return len(ready)
 
 
-def enter_rpm(directory, trials, run_id, rpm):
+def complete_run(trials, run_id):
     row = next((row for row in trials if row["run_id"] == run_id), None)
     if row is None or row["status"] != "complete":
-        raise ValueError("Use the ID of a complete run.")
+        raise ValueError(f"{run_id}: use the ID of a complete run.")
+    return row
+
+
+def enter_rpm(directory, trials, run_id, rpm, source=None):
+    row = complete_run(trials, run_id)
     row["rpm"] = positive(rpm)
+    row["rpm_source"] = source or {"method": "manual"}
     save_json(directory / "trials.json", trials)
     return export_measurements(directory, trials)
+
+
+def video_rpm(capture_fps, first_frame, last_frame, turns):
+    fps = positive(capture_fps)
+    frames = last_frame - first_frame
+    if first_frame < 0 or frames <= 0 or turns <= 0:
+        raise ValueError("Provide increasing frame indices and a positive count of complete turns.")
+    if frames / turns < 4:
+        raise ValueError("Fewer than four captured frames per revolution. Use a resolved recording.")
+    return 60 * fps * turns / frames
+
+
+def compare_pair(trials, far_id, near_id, tolerance):
+    if not 0 < tolerance < 1:
+        raise ValueError("RPM tolerance must be a fraction between 0 and 1.")
+    far = complete_run(trials, far_id)
+    near = complete_run(trials, near_id)
+    if (far["condition"], near["condition"]) != ("far", "near"):
+        raise ValueError("Provide the far run first and the near run second.")
+    for field in ("trial", "target_rpm", "propeller", "duration_ms", "settle_ms", "calibration"):
+        if far.get(field) != near.get(field):
+            raise ValueError(f"The runs differ in {field}.")
+    if not 0 < near["height_m"] < far["height_m"]:
+        raise ValueError("The near run height must be below the positive far height.")
+    if far["rpm"] is None or near["rpm"] is None:
+        raise ValueError("Both runs need independently measured RPM.")
+    far_rpm, near_rpm = positive(far["rpm"]), positive(near["rpm"])
+    far_force, near_force = positive(far["thrust_N"]), positive(near["thrust_N"])
+    rpm_difference = (near_rpm - far_rpm) / far_rpm
+    result = {"far_run": far_id, "near_run": near_id, "propeller": far.get("propeller"),
+              "far_height_m": far["height_m"], "near_height_m": near["height_m"],
+              "far_rpm": far_rpm, "near_rpm": near_rpm, "relative_rpm_difference": rpm_difference,
+              "rpm_tolerance": tolerance, "far_thrust_N": far_force, "near_thrust_N": near_force,
+              "matched": abs(rpm_difference) <= tolerance}
+    if result["matched"]:
+        result["near_minus_far_N"] = near_force - far_force
+        result["near_to_far_thrust_ratio"] = near_force / far_force
+    return result
 
 
 HELP = """cal 0                        Capture unloaded assembled-fixture readings
@@ -354,10 +398,38 @@ def main():
     annotate.add_argument("session", type=Path)
     annotate.add_argument("run_id")
     annotate.add_argument("actual_rpm")
+    video = commands.add_parser("video-rpm", help="Record RPM from a steady video segment.")
+    video.add_argument("session", type=Path)
+    video.add_argument("run_id")
+    video.add_argument("--video", required=True, help="Source video filename")
+    video.add_argument("--capture-fps", type=float, required=True)
+    video.add_argument("--first-frame", type=int, required=True)
+    video.add_argument("--last-frame", type=int, required=True)
+    video.add_argument("--turns", type=int, required=True)
+    pair = commands.add_parser("pair", help="Compare two runs at matched measured RPM.")
+    pair.add_argument("session", type=Path)
+    pair.add_argument("far_id")
+    pair.add_argument("near_id")
+    pair.add_argument("--rpm-tolerance", type=float, required=True)
     args = parser.parse_args()
-    if args.command == "rpm":
+    if args.command != "start":
         trials = load_json(args.session / "trials.json", [])
-        print(f"{enter_rpm(args.session, trials, args.run_id, args.actual_rpm)} rows in measurements.csv")
+        try:
+            if args.command == "pair":
+                print(json.dumps(compare_pair(trials, args.far_id, args.near_id, args.rpm_tolerance),
+                                 indent=2, allow_nan=False))
+            elif args.command == "video-rpm":
+                rpm = video_rpm(args.capture_fps, args.first_frame, args.last_frame, args.turns)
+                source = {"method": "video", "video": args.video, "capture_fps": args.capture_fps,
+                          "first_frame": args.first_frame, "last_frame": args.last_frame,
+                          "turns": args.turns}
+                n = enter_rpm(args.session, trials, args.run_id, rpm, source)
+                print(f"{args.run_id}: {rpm:.2f} rpm, {n} rows in measurements.csv")
+            else:
+                n = enter_rpm(args.session, trials, args.run_id, args.actual_rpm)
+                print(f"{n} rows in measurements.csv")
+        except (ValueError, KeyError) as exc:
+            parser.error(str(exc))
         return
     if args.resume is not None:
         session = load_json(args.resume / "session.json", None)

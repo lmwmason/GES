@@ -97,6 +97,30 @@ about 3600 rpm or less for this method. Use optical measurement or faster
 capture if the mark blurs or its motion between frames is ambiguous.
 Record the meter display with the run ID if using video to align measurements.
 
+### Analyze the saved runs
+
+Close the console before annotating the session from the command line. For
+slow-motion files, pass the camera's actual capture rate. Check that the
+selected segment preserves the captured frames in order without interpolation
+or dropped frames. Both frame indices must be in the same run's `STEADY`
+interval, at the same angular position of the mark. Count the complete turns
+between those frames. The example values below are illustrative.
+
+```sh
+python3 experiment_console.py video-rpm runs/SESSION run_001 \
+  --video far.mp4 --capture-fps 1000 --first-frame 120 --last-frame 360 --turns 40
+python3 experiment_console.py video-rpm runs/SESSION run_002 \
+  --video near.mp4 --capture-fps 1000 --first-frame 150 --last-frame 390 --turns 40
+python3 experiment_console.py pair runs/SESSION run_001 run_002 \
+  --rpm-tolerance 0.005 > pair_B1.json
+```
+
+The RPM provenance is kept in `trials.json`. The pair output reports both
+RPMs, heights and forces, and includes the force difference and ratio only
+when the measured RPM mismatch is within the specified tolerance. Choose
+that tolerance before inspecting the outcomes. A tolerance of `0.005` means
+0.5% relative to the far run. Keep unmatched and setup runs in the raw data.
+
 ## Raw serial commands
 
 Open the serial monitor before testing. Opening it can reset the Uno and

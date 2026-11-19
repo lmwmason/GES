@@ -1,6 +1,7 @@
 # Raw generated datasets -- regenerate with Simulator-Development/simulation/generate_dataset.sh,
 # not meant to live in git (some are 100MB+, over GitHub's hard file-size limit)
 Simulator-Development/simulation/dataset/
+Simulator-Development/simulation/experiments/results/*/corrected_dataset/dataset_all.csv
 
 # Trained model weight binaries -- regenerate via ml/train_*.py. The MLP actually
 # deployed to the firmware is checked in as firmware/ge_ff_ml_weights.h (C header) instead.

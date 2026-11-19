@@ -94,16 +94,26 @@ class Uno:
         raise RuntimeError(f"No Uno response matching {prefix!r}.")
 
     def status(self):
-        self.send("STATUS")
-        return self.response("# esc=")
+        for attempt in range(3):
+            self.send("STATUS")
+            try:
+                return self.response("# esc=", seconds=0.6)
+            except RuntimeError:
+                if attempt == 2:
+                    raise
 
     def stop(self):
-        self.send("STOP")
-        self.response("# stop requested")
-        time.sleep(1.2)
-        state = self.status()
-        if not state.startswith("# esc=off pwm_us=0"):
-            raise RuntimeError(f"Unexpected state after STOP: {state}")
+        state = "no STATUS response"
+        for _ in range(2):
+            self.send("STOP")
+            time.sleep(1.2)
+            try:
+                state = self.status()
+            except RuntimeError as exc:
+                state = str(exc)
+            if state.startswith("# esc=off pwm_us=0"):
+                return
+        raise RuntimeError(f"STOP could not be verified. Disconnect ESC power. Last state: {state}")
 
     def require_off(self, fresh=True):
         state = self.status()
@@ -177,8 +187,15 @@ def run_trial(uno, directory, trials, specs, calibration):
             uno.send(f"RUN {pulse} {duration_ms}")
             uno.response(f"# run: {pulse} us")
             deadline = time.monotonic() + duration_ms / 1000 + 1.0
-            print(f"{run_id} | {specs['condition']} | {specs['height_m']*1000:g} mm | "
-                  f"target {specs['target_rpm']:g} RPM | {pulse} us", flush=True)
+            display = sys.stdout.isatty()
+            if display:
+                print("\x1b[2J\x1b[H", end="")
+            print(f"{run_id}   {specs['trial']}   {specs['condition'].upper()}   "
+                  f"{specs['height_m']*1000:g} mm   PWM {pulse} us", flush=True)
+            if specs.get("propeller"):
+                print(f"PROPELLER {specs['propeller']}", flush=True)
+            if display:
+                print("TIME [s]      THRUST [N]     PHASE", flush=True)
             observed_end = False
             while time.monotonic() < deadline:
                 line = uno.read()
@@ -203,10 +220,11 @@ def run_trial(uno, directory, trials, specs, calibration):
                     break
                 if keep:
                     steady.append(force)
-                if sample.pwm_us == pulse:
-                    print(f"\r{run_id}   {force:+8.3f} N   {elapsed/1000:5.2f} s   "
-                          f"{'STEADY' if keep else 'SETTLING'}   ", end="", flush=True)
-            print()
+                if display and sample.pwm_us == pulse:
+                    print(f"\r{elapsed/1000:7.2f}       {force:+8.3f}      "
+                          f"{'STEADY' if keep else 'SETTLING':8}", end="", flush=True)
+            if display:
+                print()
             # A sample rarely lands exactly on the start or end edge. Allow
             # two nominal HX711 intervals for sample/edge alignment.
             if not observed_end or first_ms is None or last_ms - first_ms < duration_ms - 250:
@@ -303,6 +321,8 @@ def console(args):
                         print("PWM off.")
                     case ("run", 5) if calibration is not None:
                         specs = trial_specs(rest, args.duration_ms, args.settle_ms)
+                        if args.propeller:
+                            specs["propeller"] = args.propeller
                         run_trial(uno, args.out, trials, specs, calibration)
                     case ("rpm", 2):
                         n = enter_rpm(args.out, trials, *rest)
@@ -329,6 +349,7 @@ def main():
     output.add_argument("--resume", type=Path, help="Resume an existing session with the same fixture.")
     start.add_argument("--duration-ms", type=int, default=5000)
     start.add_argument("--settle-ms", type=int, default=2000)
+    start.add_argument("--propeller", help="Propeller identifier to display and store with each run.")
     annotate = commands.add_parser("rpm", help="Record measured RPM after closing the console.")
     annotate.add_argument("session", type=Path)
     annotate.add_argument("run_id")
@@ -346,6 +367,7 @@ def main():
         args.port = session["port"]
         args.duration_ms = session["duration_ms"]
         args.settle_ms = session["settle_ms"]
+        args.propeller = args.propeller or session.get("propeller")
         console(args)
         return
     if not 1000 <= args.duration_ms <= 10000 or not 0 <= args.settle_ms <= args.duration_ms - 700:
@@ -355,7 +377,8 @@ def main():
         args.out = Path("runs") / stamp
     args.out.mkdir(parents=True, exist_ok=False)
     save_json(args.out / "session.json", {"created_utc": datetime.now(timezone.utc).isoformat(),
-              "port": args.port, "duration_ms": args.duration_ms, "settle_ms": args.settle_ms})
+              "port": args.port, "duration_ms": args.duration_ms, "settle_ms": args.settle_ms,
+              "propeller": args.propeller})
     console(args)
 
 

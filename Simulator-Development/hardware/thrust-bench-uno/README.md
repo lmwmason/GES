@@ -74,6 +74,13 @@ to `measurements.csv`. RPM can be entered after closing the serial console.
 Use `start --resume runs/<UTC-timestamp>` to reopen a session. Check the
 unloaded reading again before relying on an earlier calibration.
 
+For a combined camera recording, enlarge the terminal text until the run
+ID, height, PWM, elapsed time, force and phase are clearly readable. Frame
+the motor bell and the display together and start recording before `run`.
+Pass `--propeller 1045` to display and record that propeller identifier.
+Use the `STEADY` segment to estimate RPM. Keep the original recording so
+the capture frame rate is available. Use the CSV for the force calculation.
+
 ```sh
 python3 experiment_console.py rpm runs/<UTC-timestamp> run_001 <actual-rpm>
 ```

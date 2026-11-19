@@ -81,6 +81,21 @@ Pass `--propeller 1045` to display and record that propeller identifier.
 Use the `STEADY` segment to estimate RPM. Keep the original recording so
 the capture frame rate is available. Use the CSV for the force calculation.
 
+For a camera that takes 2–3 seconds to start recording, enable local sound
+cues with `--camera-cues`. Test both distinct sounds before the run.
+
+```sh
+python3 experiment_console.py test-cues
+uv run --no-project --with pyserial python experiment_console.py \
+  start --resume runs/SESSION --propeller 1045 --camera-cues
+```
+
+Press record at the first sound and stop at the second. With the default
+5-second run, cues are scheduled at the first active sample and at 4.25 s
+of telemetry time. At a 2–3 s startup delay, the camera should capture
+roughly 1.25–2.25 seconds before the stop cue, plus operator reaction time.
+The cue labels also appear on screen. Cue times are saved in `trials.json`.
+
 ```sh
 python3 experiment_console.py rpm runs/<UTC-timestamp> run_001 <actual-rpm>
 ```

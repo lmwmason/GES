@@ -5,7 +5,9 @@ import argparse
 import csv
 import json
 import math
+import shutil
 import statistics
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -17,6 +19,9 @@ GRAVITY = 9.80665
 CALIBRATION_MS = 2000
 MAX_PWM_US = 1500  # The Uno independently enforces its own cap.
 TRIAL_COLUMNS = ("trial", "condition", "height_m", "target_rpm", "rpm", "thrust_N", "run_id")
+SOUNDS = Path("/usr/share/sounds/freedesktop/stereo")
+START_SOUND = "message-new-instant.oga"
+STOP_SOUND = "complete.oga"
 
 
 @dataclass(frozen=True)
@@ -166,6 +171,27 @@ def trial_specs(args, duration, settle):
             "duration_ms": duration, "settle_ms": settle}
 
 
+def recording_window(duration_ms, settle_ms):
+    """Allow 2–3 s of camera startup and at least 1.25 s of steady footage."""
+    start_ms = max(0, settle_ms - 2000)
+    stop_ms = start_ms + 3000 + 1250
+    if stop_ms + 500 > duration_ms:
+        raise ValueError("Camera cues need at least 500 ms between the stop cue and the run end.")
+    return start_ms, stop_ms
+
+
+def recording_audio_command(sound):
+    player = shutil.which("paplay")
+    path = SOUNDS / sound
+    if player is None or not path.is_file():
+        raise RuntimeError("Camera cues require paplay and the freedesktop sound files.")
+    return [player, str(path)]
+
+
+def play_recording_cue(sound):
+    subprocess.Popen(recording_audio_command(sound))
+
+
 def run_trial(uno, directory, trials, specs, calibration):
     uno.port.reset_input_buffer()
     if uno.status() != "# esc=ready pwm_us=1000 hx711_fresh=true":
@@ -178,6 +204,8 @@ def run_trial(uno, directory, trials, specs, calibration):
     save_json(directory / "trials.json", trials)
     first_ms = last_ms = None
     steady = []
+    start_cue = stop_cue = None
+    cue_label = ""
     try:
         with path.open("x", newline="") as stream:
             writer = csv.writer(stream)
@@ -195,7 +223,7 @@ def run_trial(uno, directory, trials, specs, calibration):
             if specs.get("propeller"):
                 print(f"PROPELLER {specs['propeller']}", flush=True)
             if display:
-                print("TIME [s]      THRUST [N]     PHASE", flush=True)
+                print("TIME [s]      THRUST [N]     PHASE        CAMERA", flush=True)
             observed_end = False
             while time.monotonic() < deadline:
                 line = uno.read()
@@ -218,11 +246,22 @@ def run_trial(uno, directory, trials, specs, calibration):
                 if sample.pwm_us != pulse and first_ms is not None:
                     observed_end = sample.pwm_us == 1000
                     break
+                if sample.pwm_us == pulse and specs.get("camera_cues"):
+                    start_ms, stop_ms = specs["camera_cues"]
+                    if start_cue is None and elapsed >= start_ms:
+                        play_recording_cue(START_SOUND)
+                        start_cue = record["camera_start_elapsed_ms"] = elapsed
+                        cue_label = "START RECORDING"
+                    if start_cue is not None and stop_cue is None and elapsed >= stop_ms:
+                        play_recording_cue(STOP_SOUND)
+                        stop_cue = record["camera_stop_elapsed_ms"] = elapsed
+                        cue_label = "STOP RECORDING"
                 if keep:
                     steady.append(force)
                 if display and sample.pwm_us == pulse:
                     print(f"\r{elapsed/1000:7.2f}       {force:+8.3f}      "
-                          f"{'STEADY' if keep else 'SETTLING':8}", end="", flush=True)
+                          f"{'STEADY' if keep else 'SETTLING':8}     {cue_label:16}",
+                          end="", flush=True)
             if display:
                 print()
             # A sample rarely lands exactly on the start or end edge. Allow
@@ -244,6 +283,8 @@ def run_trial(uno, directory, trials, specs, calibration):
             raise RuntimeError("STOP could not be verified. Disconnect ESC power.") from exc
         finally:
             save_json(directory / "trials.json", trials)
+            if start_cue is not None and stop_cue is None:
+                play_recording_cue(STOP_SOUND)
     print(f"{run_id}: mean {record['thrust_N']:.3f} N. "
           f"Enter actual RPM with: rpm {run_id} <rpm>")
 
@@ -324,6 +365,12 @@ q                            Stop and exit (Ctrl+C also stops a run)"""
 def console(args):
     import serial
 
+    cues = None
+    if args.camera_cues:
+        cues = recording_window(args.duration_ms, args.settle_ms)
+        for sound in (START_SOUND, STOP_SOUND):
+            recording_audio_command(sound)
+
     points = load_json(args.out / "calibration_points.json", [])
     trials = load_json(args.out / "trials.json", [])
     calibration = load_json(args.out / "calibration.json", None)
@@ -333,6 +380,8 @@ def console(args):
         port.reset_input_buffer()
         uno.require_off()
         print(f"Session: {args.out.resolve()}\n{HELP}")
+        if cues:
+            print(f"Camera sounds at {cues[0]/1000:g} s (start) and {cues[1]/1000:g} s (stop).")
         while True:
             try:
                 words = input("thrust> ").strip().split()
@@ -367,6 +416,8 @@ def console(args):
                         specs = trial_specs(rest, args.duration_ms, args.settle_ms)
                         if args.propeller:
                             specs["propeller"] = args.propeller
+                        if cues:
+                            specs["camera_cues"] = cues
                         run_trial(uno, args.out, trials, specs, calibration)
                     case ("rpm", 2):
                         n = enter_rpm(args.out, trials, *rest)
@@ -387,13 +438,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
-    start.add_argument("--port", default="/dev/ttyACM0")
+    start.add_argument("--port", help="Serial port, defaults to the saved port or /dev/ttyACM0.")
     output = start.add_mutually_exclusive_group()
     output.add_argument("--out", type=Path)
     output.add_argument("--resume", type=Path, help="Resume an existing session with the same fixture.")
     start.add_argument("--duration-ms", type=int, default=5000)
     start.add_argument("--settle-ms", type=int, default=2000)
     start.add_argument("--propeller", help="Propeller identifier to display and store with each run.")
+    start.add_argument("--camera-cues", action="store_true", help="Play recording start/stop sounds.")
+    commands.add_parser("test-cues", help="Play the two camera sounds without opening the Uno port.")
     annotate = commands.add_parser("rpm", help="Record measured RPM after closing the console.")
     annotate.add_argument("session", type=Path)
     annotate.add_argument("run_id")
@@ -412,6 +465,12 @@ def main():
     pair.add_argument("near_id")
     pair.add_argument("--rpm-tolerance", type=float, required=True)
     args = parser.parse_args()
+    if args.command == "test-cues":
+        for label, sound in (("START RECORDING", START_SOUND), ("STOP RECORDING", STOP_SOUND)):
+            print(label, flush=True)
+            subprocess.run(recording_audio_command(sound), check=True)
+            time.sleep(0.35)
+        return
     if args.command != "start":
         trials = load_json(args.session / "trials.json", [])
         try:
@@ -436,7 +495,7 @@ def main():
         if session is None:
             parser.error("resume requires an existing session directory")
         args.out = args.resume
-        args.port = session["port"]
+        args.port = args.port or session["port"]
         args.duration_ms = session["duration_ms"]
         args.settle_ms = session["settle_ms"]
         args.propeller = args.propeller or session.get("propeller")
@@ -447,6 +506,7 @@ def main():
     if args.out is None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         args.out = Path("runs") / stamp
+    args.port = args.port or "/dev/ttyACM0"
     args.out.mkdir(parents=True, exist_ok=False)
     save_json(args.out / "session.json", {"created_utc": datetime.now(timezone.utc).isoformat(),
               "port": args.port, "duration_ms": args.duration_ms, "settle_ms": args.settle_ms,

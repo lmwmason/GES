@@ -2,11 +2,11 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call, patch
 
 from experiment_console import (
-    GRAVITY, capture_calibration, compare_pair, enter_rpm, fit_calibration, run_trial, to_newtons,
-    trial_specs, video_rpm,
+    GRAVITY, START_SOUND, STOP_SOUND, capture_calibration, compare_pair, enter_rpm,
+    fit_calibration, recording_window, run_trial, to_newtons, trial_specs, video_rpm,
 )
 
 
@@ -79,6 +79,26 @@ class ExperimentConsoleTests(unittest.TestCase):
             video_rpm(1000, 120, 240, 40)
         with self.assertRaisesRegex(ValueError, "increasing"):
             video_rpm(1000, 120, 119, 1)
+
+    def test_camera_cues_account_for_startup_delay(self):
+        uno = Mock()
+        uno.status.return_value = "# esc=ready pwm_us=1000 hx711_fresh=true"
+        uno.read.side_effect = [f"{t},1100,200,0" for t in range(0, 5000, 100)] + [
+            "5000,1000,100,0"
+        ]
+        specs = trial_specs(["B1", "far", "250", "3000", "1100"], 5000, 2000)
+        specs["camera_cues"] = recording_window(5000, 2000)
+        self.assertEqual(specs["camera_cues"], (0, 4250))
+        with self.assertRaises(ValueError):
+            recording_window(4000, 2000)
+        trials = []
+        with tempfile.TemporaryDirectory() as path, patch(
+            "experiment_console.play_recording_cue"
+        ) as play:
+            run_trial(uno, Path(path), trials, specs, {"zero_counts": 100, "counts_per_n": 50})
+        self.assertEqual(play.call_args_list, [call(START_SOUND), call(STOP_SOUND)])
+        self.assertEqual(trials[0]["camera_start_elapsed_ms"], 0)
+        self.assertEqual(trials[0]["camera_stop_elapsed_ms"], 4300)
 
     def test_pair_checks_measured_speeds_and_propeller(self):
         far = {"run_id": "run_001", "status": "complete", "condition": "far",

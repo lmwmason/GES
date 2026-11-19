@@ -68,6 +68,17 @@ It does not measure signal amplitude or tell whether the ESC has armed.
 
 ## XM30FX endpoint calibration
 
+The optional Linux console sends the same commands with single keystrokes.
+Close the regular serial monitor before opening it.
+
+```sh
+uv run --no-project --with pyserial python calibrate_console.py /dev/ttyACM0
+```
+
+The console waits for the operator to press `h` and displays the connection
+prompt only after the Uno acknowledges the high command. Press `l` immediately
+after the two confirmation beeps, or `!` to abort.
+
 The normal `RUN` cap remains 1500 us. `CAL HIGH` is a separate command
 that can send the full 2000 us signal for at most six seconds. Use it only
 with the propeller removed, motor secured, and ESC battery disconnected at

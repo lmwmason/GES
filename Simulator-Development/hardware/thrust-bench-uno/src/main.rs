@@ -12,6 +12,16 @@ use thrust_bench_uno::{Esc, FRAME_MS, IDLE_US, sign_extend_hx711};
 const FRAME_TICKS: u16 = (FRAME_MS * 2000) as u16;
 const RATE_TIMEOUT_MS: u32 = 500;
 const TARE_SAMPLES: u8 = 16;
+const CAPTURE_TIMEOUT_MS: u32 = 150;
+
+#[derive(Default)]
+struct Capture {
+    started_ms: Option<u32>,
+    last_rise: Option<u16>,
+    period: Option<u16>,
+    width: Option<u16>,
+    waiting_for_fall: bool,
+}
 
 struct Pwm {
     esc: Esc,
@@ -21,6 +31,7 @@ struct Pwm {
     frame_ms: u32,
     frame_start: u16,
     applied_us: u16,
+    capture: Capture,
 }
 
 static PWM: Mutex<RefCell<Option<Pwm>>> = Mutex::new(RefCell::new(None));
@@ -47,6 +58,44 @@ impl Pwm {
         // Leave high set until the existing falling-edge timer event. It
         // will schedule the normal frame boundary, without raising the pin.
     }
+
+    fn start_capture(&mut self) {
+        self.capture = Capture {
+            started_ms: Some(self.now_ms()),
+            ..Capture::default()
+        };
+        self.timer.tccr1b().modify(|_, w| w.ices1().set_bit());
+        self.timer.tifr1().write(|w| w.icf1().set_bit());
+        self.timer.timsk1().modify(|_, w| w.icie1().set_bit());
+    }
+
+    fn stop_capture(&self) {
+        self.timer.timsk1().modify(|_, w| w.icie1().clear_bit());
+    }
+}
+
+#[avr_device::interrupt(atmega328p)]
+fn TIMER1_CAPT() {
+    with_pwm(|pwm| {
+        let tick = pwm.timer.icr1().read().bits();
+        let capture = &mut pwm.capture;
+        if capture.waiting_for_fall {
+            if let Some(rise) = capture.last_rise {
+                if capture.period.is_some() {
+                    capture.width = Some(tick.wrapping_sub(rise));
+                    pwm.stop_capture();
+                    return;
+                }
+            }
+            pwm.timer.tccr1b().modify(|_, w| w.ices1().set_bit());
+        } else {
+            capture.period = capture.last_rise.map(|rise| tick.wrapping_sub(rise));
+            capture.last_rise = Some(tick);
+            pwm.timer.tccr1b().modify(|_, w| w.ices1().clear_bit());
+        }
+        capture.waiting_for_fall = !capture.waiting_for_fall;
+        pwm.timer.tifr1().write(|w| w.icf1().set_bit());
+    });
 }
 
 #[avr_device::interrupt(atmega328p)]
@@ -77,6 +126,7 @@ enum Command {
     Stop,
     Tare,
     Status,
+    Probe,
 }
 
 fn parse(line: &str) -> Option<Command> {
@@ -87,6 +137,7 @@ fn parse(line: &str) -> Option<Command> {
         "STOP" => Command::Stop,
         "TARE" => Command::Tare,
         "STATUS" => Command::Status,
+        "PROBE" => Command::Probe,
         _ => return None,
     };
     words.next().is_none().then_some(command)
@@ -102,6 +153,7 @@ fn main() -> ! {
     let data = pins.d3.into_floating_input();
     let mut esc_pin = pins.d4.into_output();
     esc_pin.set_low();
+    let _capture_pin = pins.d8.into_floating_input();
 
     let timer = peripherals.TC1;
     timer.tccr1b().write(|w| w.cs1().prescale_8());
@@ -120,6 +172,7 @@ fn main() -> ! {
             frame_ms: 0,
             frame_start: start,
             applied_us: 0,
+            capture: Capture::default(),
         });
     });
     // Timer state and output pin are initialized before enabling interrupts.
@@ -144,6 +197,35 @@ fn main() -> ! {
 
     loop {
         let now = with_pwm(|pwm| pwm.now_ms());
+        let capture_result = with_pwm(|pwm| {
+            let start = pwm.capture.started_ms?;
+            if let (Some(width), Some(period)) = (pwm.capture.width, pwm.capture.period) {
+                pwm.capture.started_ms = None;
+                return Some(Some((width, period)));
+            }
+            if now.wrapping_sub(start) >= CAPTURE_TIMEOUT_MS {
+                pwm.stop_capture();
+                pwm.capture.started_ms = None;
+                return Some(None);
+            }
+            None
+        });
+        match capture_result {
+            Some(Some((width, period))) => {
+                // Timer1 runs at 2 MHz.
+                ufmt::uwriteln!(
+                    &mut serial,
+                    "# probe width_ns={} period_ns={}",
+                    u32::from(width) * 500,
+                    u32::from(period) * 500
+                )
+                .unwrap_infallible();
+            }
+            Some(None) => {
+                ufmt::uwriteln!(&mut serial, "# probe: no complete PWM on D8").unwrap_infallible();
+            }
+            None => {}
+        }
         let fresh = last_sample.is_some_and(|time| now.wrapping_sub(time) <= RATE_TIMEOUT_MS);
         if !fresh {
             let stopped = with_pwm(|pwm| match pwm.esc {
@@ -289,10 +371,15 @@ fn main() -> ! {
                 )
                 .unwrap_infallible();
             }
+            Some(Command::Probe) => with_pwm(|pwm| {
+                if !matches!(pwm.esc, Esc::Running(..)) {
+                    pwm.start_capture();
+                }
+            }),
             _ => {
                 ufmt::uwriteln!(
                     &mut serial,
-                    "# rejected; STATUS or ARM / RUN <1001..1500> <100..10000ms> / TARE / STOP"
+                    "# rejected; STATUS / PROBE / ARM / RUN <1001..1500> <100..10000ms> / TARE / STOP"
                 )
                 .unwrap_infallible();
             }

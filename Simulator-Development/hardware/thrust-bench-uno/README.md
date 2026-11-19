@@ -27,7 +27,65 @@ sh build.sh /dev/ttyACM0     # Compile, upload, and verify
 arduino-cli monitor -p /dev/ttyACM0 --config baudrate=115200
 ```
 
-## Record a run
+## Calibrate the load cell and record thrust
+
+Close the serial monitor and start the experiment console from this directory.
+The Rust firmware already flashed to the Uno provides the serial data.
+
+```sh
+uv run --no-project --with pyserial python experiment_console.py start
+```
+
+1. Disconnect the ESC battery and leave the Uno on USB. Keep the load cell
+   in its assembled test fixture. With no calibration mass attached and the
+   fixture at rest, enter `cal 0` to record its baseline.
+2. Apply independently weighed masses one at a time through the same load
+   path and in the same force direction as thrust. Enter the actual mass in
+   grams, for example `cal 200` and `cal 400` for 200 g and 400 g. Keep each
+   mass still until its two-second capture ends. Use loads spanning the
+   expected force range within the fixture and load-cell ratings. Include
+   the mass of any hanger added after the baseline.
+3. Remove the weights, repeat `cal 0` to check zero return, then enter `fit`.
+   The console saves the signed counts-per-newton slope, the zero offset and
+   the largest fit residual in newtons. Compare the two unloaded readings
+   and the fit residual with the smallest force change you need to resolve.
+   Recalibrate if the load path changes or the zero moves substantially.
+4. With the guarded bench clear, enter `arm` to output minimum PWM. For
+   ESC power-up, connect the battery while this minimum is present. Wait for
+   the ESC's ready tone and use `status` to verify the Uno reports ready.
+   Within that ready window, enter the prepared command
+   `run <block> <near|far> <height-mm> <target-rpm> <pwm-us>`.
+   Height is measured from the rotor plane to the ground plate. The default
+   run lasts 5 s, with the first 2 s excluded from the steady force estimate.
+   Each run ends with a verified stop. Use `stop` before handling the fixture
+   and the physical cutoff if a run needs to be stopped immediately.
+5. Enter `rpm <run-id> <actual-rpm>` using an independent measurement from
+   that run's steady interval. Match near/far conditions on measured RPM
+   within a tolerance defined before testing. Use separate block IDs for
+   setup attempts and retain their raw recordings.
+
+The console shows live force and the run ID. It writes session settings,
+calibration samples and fit, raw run CSVs, and run summaries to
+`runs/<UTC-timestamp>/`. Complete runs with measured RPM are also exported
+to `measurements.csv`. RPM can be entered after closing the serial console.
+
+```sh
+python3 experiment_console.py rpm runs/<UTC-timestamp> run_001 <actual-rpm>
+```
+
+### Measure RPM independently
+
+Use a non-contact optical tachometer or a fixed optical pickup with one pulse
+per revolution and record the steady reading with the run ID. With a camera,
+place one visible mark on the motor bell while powered off. Use the actual
+capture frame rate and count complete, unambiguously resolved revolutions
+between frames. RPM equals `60 × capture fps × turns / elapsed frames`.
+Aim for at least four frames per turn. For example, at 240 fps that means
+about 3600 rpm or less for this method. Use optical measurement or faster
+capture if the mark blurs or its motion between frames is ambiguous.
+Record the meter display with the run ID if using video to align measurements.
+
+## Raw serial commands
 
 Open the serial monitor before testing. Opening it can reset the Uno and
 clears the tare. Send uppercase commands, followed by Enter.

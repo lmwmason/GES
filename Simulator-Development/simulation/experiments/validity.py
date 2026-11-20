@@ -126,7 +126,8 @@ def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict
                    clamp_delta=None, pulse_start=None, pulse_duration=None,
                    altitude_gain_scale=1.0, oracle_aggregation="arithmetic",
                    oracle_horizon=0.0, ge_base_model="cheeseman",
-                   prediction_bias=0.0) -> dict:
+                   prediction_bias=0.0, rangefinder_delay_ms=0,
+                   rangefinder_period_ms=1) -> dict:
     raw_dir = out_dir / "raw"
     log_dir = out_dir / "logs"
     raw_dir.mkdir(parents=True, exist_ok=True); log_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +135,8 @@ def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict
     aggregation_tag = "_ow" if oracle_aggregation == "thrust-weighted" else ""
     horizon_tag = f"_h{oracle_horizon:.3f}_{ge_base_model}_pb{prediction_bias:+.3f}"
     tag = f"seed{seed}_{mode}{aggregation_tag}{horizon_tag}_b{oracle_bias:+.3f}_s{slope_exponent:.2f}_c{curvature_gain:.2f}{pulse_tag}"
+    if (rangefinder_delay_ms, rangefinder_period_ms) != (0, 1):
+        tag += f"_rd{rangefinder_delay_ms}_rp{rangefinder_period_ms}"
     tmp_csv = raw_dir / f"{tag}.csv"
     gz_csv = raw_dir / f"{tag}.csv.gz"
     cmd = [str(root / "build/bin/simulator"), "--fc", str(root / "build/bin/libfc.so"),
@@ -143,6 +146,9 @@ def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict
     cmd += ["--oracle-aggregation", oracle_aggregation, "--oracle-horizon", str(oracle_horizon)]
     cmd += ["--ge-base-model", ge_base_model]
     cmd += ["--prediction-bias", str(prediction_bias)]
+    if (rangefinder_delay_ms, rangefinder_period_ms) != (0, 1):
+        cmd += ["--rangefinder-delay-ms", str(rangefinder_delay_ms),
+                "--rangefinder-period-ms", str(rangefinder_period_ms)]
     if pulse_start is not None:
         cmd += ["--oracle-pulse-start", str(pulse_start),
                 "--oracle-pulse-duration", str(pulse_duration)]
@@ -160,6 +166,8 @@ def run_simulation(root: Path, out_dir: Path, *, mode: str, seed: int, cfg: dict
               "oracle_horizon": oracle_horizon,
               "ge_base_model": ge_base_model,
               "prediction_bias": prediction_bias,
+              "rangefinder_delay_ms": rangefinder_delay_ms,
+              "rangefinder_period_ms": rangefinder_period_ms,
               "pulse_start": pulse_start, "pulse_duration": pulse_duration,
               "returncode": proc.returncode, "status": "failed" if proc.returncode else "complete"}
     if proc.returncode:
@@ -182,7 +190,8 @@ def paired_statistics(metrics: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     rows = []
     rng = np.random.default_rng(cfg["bootstrap"]["seed"])
     n_boot = int(cfg["bootstrap"]["resamples"])
-    design_columns = [name for name in ("slope_exponent", "curvature_gain", "altitude_gain_scale", "ge_base_model")
+    design_columns = [name for name in ("slope_exponent", "curvature_gain", "altitude_gain_scale",
+                                        "ge_base_model", "rangefinder_delay_ms", "rangefinder_period_ms")
                       if name in metrics and metrics[name].nunique(dropna=False) > 1]
     grouped = metrics.groupby(design_columns, dropna=False) if design_columns else [((), metrics)]
     for design_values, group in grouped:

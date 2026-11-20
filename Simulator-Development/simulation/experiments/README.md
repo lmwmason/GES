@@ -14,6 +14,58 @@ closed-loop seed participates in model training, validation, or offline test.
 The oracle is diagnostic and cannot be deployed because it receives the
 simulator's ground-truth GE multiplier.
 
+## Bench measurements and rangefinder timing
+
+Run from the simulation directory. The sensor and thrust instruments can be
+logged independently. Keep the original videos, trace files and calibration
+records alongside the derived CSVs.
+
+- Sensor header: `trial,direction,stimulus_ms,received_ms,status,acquisition_start_ms`
+  on a common clock. Use `nearer` or `farther` and `ok` or `timeout`.
+  `acquisition_start_ms` is optional. Count all timeouts and record the
+  continuous sampling period separately. For a video-based measurement, use
+  frame timestamps and state the temporal resolution.
+- Thrust header: `trial,condition,height_m,target_rpm,rpm,thrust_N`.
+  Each block at a given target RPM needs one measured `far` reference and at
+  least one `near` height. Enter means over matched stable windows. Use a new
+  block identifier for each independent repeat. Set a fractional RPM matching
+  tolerance before looking at the thrust values. Use new readings for any
+  retest and retain the unsummarized records.
+
+```sh
+python experiments/bench_measurements.py latency sensor_trials.csv
+python experiments/bench_measurements.py thrust thrust_trials.csv --rpm-tolerance 0.01
+```
+
+The timing runner compares the unchanged simulator to user-supplied delay
+and sample-and-hold periods on the registered 30 controller seeds with the
+deployed weights fixed. Only the rangefinder path is affected, including the
+altitude PID input, analytical and ML estimator inputs, and hybrid cutover.
+The motor model and other sensors retain their existing timing. The oracle
+factor still uses simulator truth. The rangefinder is unavailable at startup
+until the first delayed observation arrives. The default 0 ms delay and 1 ms
+period preserve the original simulator input.
+
+Use the observed acquisition-to-output latency as the fixed delay if acquired
+separately, and the observed update interval as the period. The stimulus-to-value
+latency already includes sampling wait. When that is the only observation,
+use fixed-delay sensitivity at the original cadence, or calibrate an explicit
+sampling model separately, to avoid counting the same wait twice.
+
+```sh
+cmake --build build -j
+.venv/bin/python experiments/run.py rangefinder-timing --run-id rangefinder-delay-reproduction \
+  --rangefinder-condition 20 1 --rangefinder-condition 70 1 \
+  --clamp-delta 0 --workers 4
+```
+
+Use a fresh run ID. The output includes per-seed metrics, a run manifest, raw
+telemetry and `rangefinder_timing_summary.csv`. Pairwise controller contrasts are
+computed within each timing condition. The published comparison uses 0, 20,
+and 70 ms fixed delays with a 1 ms sampling period in all three conditions.
+These values are simulator sensitivity settings. The original raw telemetry,
+configuration, and summaries are in the [Zenodo version 1.1 deposit](https://doi.org/10.5281/zenodo.24383190).
+
 ## Major-revision corrected-dynamics rerun
 
 The reviewer rerun is written to a new directory. Dataset generation refuses

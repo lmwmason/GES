@@ -152,6 +152,7 @@ static void print_usage(const char *prog) {
         "          [--oracle-aggregation arithmetic|thrust-weighted]\n"
         "          [--oracle-horizon SEC]\n"
         "          [--prediction-bias X]\n"
+        "          [--rangefinder-delay-ms N] [--rangefinder-period-ms N]\n"
         "          [--ge-slope-exponent X] [--ge-curvature-gain X]\n"
         "          [--ge-base-model cheeseman|hayden]\n"
         "  --fc PATH        path to the firmware shared object (default: auto-detected next to this binary)\n"
@@ -164,6 +165,8 @@ static void print_usage(const char *prog) {
         "  --oracle-pulse-duration SEC  pulse width; requires pulse start\n"
         "  --oracle-aggregation MODE  collective truth reduction (default arithmetic)\n"
         "  --oracle-horizon SEC  kinematic terrain-preview horizon (diagnostic only)\n"
+        "  --rangefinder-delay-ms N  fixed delay on range observations (default 0)\n"
+        "  --rangefinder-period-ms N  range sample-and-hold period (default 1)\n"
         "  --ge-slope-exponent X  heuristic slope exponent (default 1.0)\n"
         "  --ge-curvature-gain X  heuristic curvature gain (default 0.6)\n",
         prog);
@@ -184,6 +187,8 @@ int main(int argc, char **argv) {
     const char *oracle_aggregation = "arithmetic";
     double oracle_horizon = 0.0;
     double prediction_bias = 0.0;
+    long rangefinder_delay_ms = 0;
+    long rangefinder_period_ms = 1;
     double ge_slope_exponent = 1.0;
     double ge_curvature_gain = 0.6;
     ge_base_model_t ge_base_model = GE_BASE_CHEESEMAN;
@@ -203,6 +208,19 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--oracle-aggregation") && i + 1 < argc) oracle_aggregation = argv[++i];
         else if (!strcmp(argv[i], "--oracle-horizon") && i + 1 < argc) oracle_horizon = atof(argv[++i]);
         else if (!strcmp(argv[i], "--prediction-bias") && i + 1 < argc) prediction_bias = atof(argv[++i]);
+        else if ((!strcmp(argv[i], "--rangefinder-delay-ms") ||
+                  !strcmp(argv[i], "--rangefinder-period-ms")) && i + 1 < argc) {
+            int delay_option = !strcmp(argv[i], "--rangefinder-delay-ms");
+            const char *arg = argv[++i];
+            char *end;
+            long value = strtol(arg, &end, 10);
+            if (end == arg || *end || value < (delay_option ? 0 : 1) || value > 1000) {
+                fprintf(stderr, "[sim] invalid rangefinder delay or period in ms: %s\n", arg);
+                return 1;
+            }
+            if (delay_option) rangefinder_delay_ms = value;
+            else rangefinder_period_ms = value;
+        }
         else if (!strcmp(argv[i], "--ge-slope-exponent") && i + 1 < argc) ge_slope_exponent = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-curvature-gain") && i + 1 < argc) ge_curvature_gain = atof(argv[++i]);
         else if (!strcmp(argv[i], "--ge-base-model") && i + 1 < argc) {
@@ -293,6 +311,11 @@ int main(int argc, char **argv) {
     const double telemetry_dt = 1.0 / TELEMETRY_HZ;
     double t = 0.0;
     double next_telemetry_t = 0.0;
+    const size_t range_delay = (size_t)lround(rangefinder_delay_ms * PHYSICS_HZ / 1000.0);
+    const size_t range_period = (size_t)lround(rangefinder_period_ms * PHYSICS_HZ / 1000.0);
+    double range_history[range_delay + 1];
+    double delivered_range = NAN;
+    size_t physics_step = 0;
 
     struct timespec t_start;
     clock_gettime(CLOCK_MONOTONIC, &t_start);
@@ -302,6 +325,15 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 4; i++) rpm_now[i] = motors[i].rpm;
 
         sensor_packet_t sp = build_sensors(&rb, rpm_now, t, dt);
+        /* Keep the existing sensor draws and dynamics in every condition.
+         * Record a range sample at each step, then deliver a delayed sample
+         * at the configured cadence. The FC sees an unavailable range until
+         * the first sample is delivered. Other sensor channels stay current. */
+        range_history[physics_step % (range_delay + 1)] = sp.rangefinder_alt;
+        if (physics_step >= range_delay && (physics_step - range_delay) % range_period == 0)
+            delivered_range = range_history[(physics_step - range_delay) % (range_delay + 1)];
+        sp.rangefinder_alt = delivered_range;
+        physics_step++;
         double oracle_truth[4];
         for (int i = 0; i < 4; i++) {
             vec3_t off = {DP_MOTOR_LAYOUT[i].x, DP_MOTOR_LAYOUT[i].y, 0.0};

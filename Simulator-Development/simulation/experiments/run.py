@@ -76,7 +76,9 @@ def run_records(cfg, out, specs, workers=1):
     if "pulse_duration" in comparison and comparison.pulse_duration.nunique() > 1:
         comparison["mode"] = comparison["mode"] + "_d" + comparison["pulse_duration"].map(lambda x:f"{x:.4f}")
     paired_statistics(comparison, cfg).to_csv(out / "paired_statistics.csv", index=False)
-    metrics.groupby("mode").agg({
+    timing_keys = ["rangefinder_delay_ms", "rangefinder_period_ms"]
+    group_keys = timing_keys + ["mode"] if any(metrics[key].nunique() > 1 for key in timing_keys) else ["mode"]
+    metrics.groupby(group_keys).agg({
         "agl_rms_primary": ["mean", "std"], "low_clearance_duration_s": ["mean", "std"],
         "low_clearance_events": ["mean", "std"], "gyro_rms": ["mean", "std"],
         "minimum_clearance_m": ["mean", "std"], "p05_clearance_m": ["mean", "std"]
@@ -208,19 +210,42 @@ def base_model_command(cfg, out, workers):
     }).to_csv(out/"base_model_summary.csv")
 
 
+def rangefinder_timing_command(cfg, out, conditions, clamp_delta, workers):
+    baseline = closed_loop_specs(cfg, clamp_delta=clamp_delta)
+    specs = [dict(spec, rangefinder_delay_ms=delay, rangefinder_period_ms=period)
+             for delay, period in conditions for spec in baseline]
+    metrics = run_records(cfg, out, specs, workers=workers)
+    keys = ["rangefinder_delay_ms", "rangefinder_period_ms", "mode"]
+    measures = ["agl_rms_primary", "gyro_rms", "minimum_clearance_m", "p05_clearance_m",
+                "low_clearance_duration_s", "low_clearance_events"]
+    metrics.groupby(keys)[measures].agg(["mean", "std"]).to_csv(out / "rangefinder_timing_summary.csv")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "ml-pulse", "robustness", "bandwidth", "oracle-aggregation", "oracle-timing", "base-model"])
+    ap.add_argument("command", choices=["split", "offline", "clamp-validation", "closed-loop", "bias", "pulse", "ml-pulse", "robustness", "bandwidth", "oracle-aggregation", "oracle-timing", "base-model", "rangefinder-timing"])
     ap.add_argument("--config", default="experiments/configs/ijira_validity.json")
     ap.add_argument("--out-root", default="experiments/results/ijira_validity")
     ap.add_argument("--run-id")
     ap.add_argument("--clamp-delta", type=float)
     ap.add_argument("--offline-epochs", type=int, default=25)
     ap.add_argument("--offline-models", default="all")
+    ap.add_argument("--rangefinder-condition", action="append", type=int, nargs=2,
+                    metavar=("DELAY_MS", "PERIOD_MS"))
     ap.add_argument("--workers", type=int, default=1,
                     help="independent simulator workers (robustness only)")
     args = ap.parse_args()
+    if args.command == "rangefinder-timing":
+        conditions = [(0, 1)] + [tuple(pair) for pair in args.rangefinder_condition or []]
+        if len(conditions) < 2 or len(conditions) != len(set(conditions)):
+            ap.error("rangefinder-timing requires distinct non-default --rangefinder-condition values")
+        if any(not (0 <= delay <= 1000 and 1 <= period <= 1000) for delay, period in conditions):
+            ap.error("rangefinder delay must be 0–1000 ms and period 1–1000 ms")
+    elif args.rangefinder_condition:
+        ap.error("--rangefinder-condition is only available with rangefinder-timing")
     cfg = load_config(ROOT / args.config)
+    if args.command == "rangefinder-timing":
+        cfg["rangefinder_timing_conditions_ms"] = conditions
     out = prepare_run(args, cfg)
     if args.command == "split": split_command(cfg, out)
     elif args.command == "offline":
@@ -240,6 +265,8 @@ def main():
     elif args.command == "oracle-aggregation": oracle_aggregation_command(cfg, out, args.workers)
     elif args.command == "oracle-timing": oracle_timing_command(cfg, out, args.workers)
     elif args.command == "base-model": base_model_command(cfg, out, args.workers)
+    elif args.command == "rangefinder-timing":
+        rangefinder_timing_command(cfg, out, conditions, args.clamp_delta, args.workers)
     print(f"[experiment] outputs: {out}")
 
 
